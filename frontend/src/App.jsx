@@ -31,8 +31,9 @@ import {
 } from "recharts";
 import heroPoster from "./assets/hero.png";
 import fifaLogo from "./assets/fifa-transparent.png";
+import { supabase } from "./supabase.js";
 
-
+const AI_SERVICE_URL = import.meta.env.VITE_AI_SERVICE_URL || "http://localhost:8000";
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 
 
@@ -183,7 +184,7 @@ function App() {
     return ["Clinical Finisher", "Speed Dribbler", "Attacking Threat"];
   };
 
-  // Fetch initial data
+  // Fetch initial data & subscribe to realtime updates
   useEffect(() => {
     fetchAllMatches();
     fetchLiveMatches();
@@ -192,12 +193,20 @@ function App() {
     fetchTeams();
     fetchPlayers();
 
-    const interval = setInterval(() => {
-      fetchLiveMatches();
-      fetchAllMatches();
-    }, 10000);
+    // Subscribe to realtime updates on matches table
+    const matchSubscription = supabase
+      .channel('public:matches')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, (payload) => {
+        console.log('Realtime Match Update:', payload);
+        fetchAllMatches();
+        fetchLiveMatches();
+        fetchUpcomingMatches();
+      })
+      .subscribe();
 
-    return () => clearInterval(interval);
+    return () => {
+      supabase.removeChannel(matchSubscription);
+    };
   }, []);
 
   // Carousel autoplay rotation and range filtering (last 24 hours to next 24 hours = 48 hours)
@@ -284,7 +293,7 @@ function App() {
   const getPlayerPhoto = (player) => {
     if (player?.photo) return player.photo;
     const key = player?.name?.toLowerCase().trim().replace(/[-\s]+/g, " ") || "";
-    return playerCutoutsByName[key] || playerCutoutsByTeam[player?.team?.toLowerCase()] || null;
+    return playerCutoutsByName[key] || null;
   };
 
   const teamColors = {
@@ -338,6 +347,10 @@ function App() {
     if (!countryCode || typeof countryCode !== "string" || countryCode.length !== 2) {
       return countryCode || "⚽";
     }
+    // Only parse standard 2-letter alphabetic country codes (like 'US', 'GB')
+    if (!/^[A-Za-z]{2}$/.test(countryCode)) {
+      return countryCode;
+    }
     const codePoints = countryCode
       .toUpperCase()
       .split("")
@@ -347,6 +360,28 @@ function App() {
     } catch (e) {
       return countryCode;
     }
+  };
+
+  const renderFlag = (flagValue, sizeClass = "w-12 h-12", textClass = "text-3xl") => {
+    if (!flagValue) return <span className={`${textClass}`}>⚽</span>;
+    if (typeof flagValue === "string" && flagValue.startsWith("http")) {
+      return (
+        <span className="inline-flex items-center justify-center relative">
+          <img 
+            src={flagValue} 
+            alt="Flag" 
+            className={`${sizeClass} object-contain drop-shadow-md`} 
+            onError={(e) => { 
+              e.currentTarget.style.display = 'none';
+              const sib = e.currentTarget.nextSibling;
+              if (sib) sib.style.display = 'inline';
+            }}
+          />
+          <span className={`${textClass}`} style={{ display: 'none' }}>⚽</span>
+        </span>
+      );
+    }
+    return <span className={`${textClass} filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]`}>{getFlagEmoji(flagValue)}</span>;
   };
 
 
@@ -411,12 +446,157 @@ function App() {
 
   const normalizeMatchesForUi = (data) => Array.isArray(data) ? data.map(normalizeMatchForUi) : [];
 
+  const runLocalPrediction = (teamA, teamB, options = {}) => {
+    const { formationA, mentalityA, formationB, mentalityB } = options;
+
+    const tA = teams.find(t => t.id === teamA.toLowerCase() || t.name.toLowerCase() === teamA.toLowerCase()) || {
+      name: teamA, fifaRanking: 30, attackPower: 75, defenseRating: 75, form: ["D"], h2h: {}
+    };
+    const tB = teams.find(t => t.id === teamB.toLowerCase() || t.name.toLowerCase() === teamB.toLowerCase()) || {
+      name: teamB, fifaRanking: 30, attackPower: 75, defenseRating: 75, form: ["D"], h2h: {}
+    };
+
+    let attackA = tA.attackPower || 75;
+    let defenseA = tA.defenseRating || 75;
+    let attackB = tB.attackPower || 75;
+    let defenseB = tB.defenseRating || 75;
+
+    if (mentalityA === "attacking") { attackA *= 1.15; defenseA *= 0.88; }
+    else if (mentalityA === "defensive") { defenseA *= 1.15; attackA *= 0.88; }
+
+    if (mentalityB === "attacking") { attackB *= 1.15; defenseB *= 0.88; }
+    else if (mentalityB === "defensive") { defenseB *= 1.15; attackB *= 0.88; }
+
+    const getFormationModifier = (f) => {
+      if (["5-4-1", "4-5-1", "5-3-2"].includes(f)) return { att: 0.90, def: 1.15 };
+      if (["4-3-3", "3-4-3", "4-2-4"].includes(f)) return { att: 1.12, def: 0.92 };
+      return { att: 1.05, def: 1.05 };
+    };
+
+    if (formationA) {
+      const mod = getFormationModifier(formationA);
+      attackA *= mod.att;
+      defenseA *= mod.def;
+    }
+    if (formationB) {
+      const mod = getFormationModifier(formationB);
+      attackB *= mod.att;
+      defenseB *= mod.def;
+    }
+
+    const rankStrengthA = Math.max(10, 100 - (tA.fifaRanking || 30));
+    const rankStrengthB = Math.max(10, 100 - (tB.fifaRanking || 30));
+
+    const getFormScore = (formArray) => {
+      if (typeof formArray === "number") return formArray;
+      if (!Array.isArray(formArray) || formArray.length === 0) return 60.0;
+      return formArray.reduce((acc, val) => {
+        if (val === "W") return acc + 3;
+        if (val === "D") return acc + 1;
+        return acc;
+      }, 0) / (formArray.length * 3) * 100;
+    };
+
+    const formScoreA = getFormScore(tA.form);
+    const formScoreB = getFormScore(tB.form);
+
+    // H2H modifier calculation
+    let h2hModA = 1.0;
+    let h2hModB = 1.0;
+    const teamBKey = tB.name.toLowerCase().replace(/[-\s]+/g, "_");
+    const h2hData = tA.h2h?.[teamBKey] || tA.h2h?.[tB.name.toLowerCase()];
+    if (h2hData && typeof h2hData === "string" && h2hData.includes("-")) {
+      try {
+        const parts = h2hData.split("-").map(Number);
+        const wins = parts[0] || 0;
+        const draws = parts[1] || 0;
+        const losses = parts[2] || 0;
+        const total = wins + draws + losses;
+        if (total > 0) {
+          h2hModA = 1.0 + ((wins - losses) / (total * 10));
+          h2hModB = 2.0 - h2hModA;
+        }
+      } catch (e) {}
+    }
+
+    // Expected Goals (xG)
+    const xG_A = Math.max(0.2, (attackA / (defenseB + 5)) * (formScoreA / 75.0) * h2hModA * 1.35);
+    const xG_B = Math.max(0.2, (attackB / (defenseA + 5)) * (formScoreB / 75.0) * h2hModB * 1.35);
+
+    let scoreA = (0.35 * rankStrengthA) + (0.25 * formScoreA) + (0.20 * attackA) + (0.20 * defenseA);
+    let scoreB = (0.35 * rankStrengthB) + (0.25 * formScoreB) + (0.20 * attackB) + (0.20 * defenseB);
+
+    scoreA *= h2hModA;
+    scoreB *= h2hModB;
+
+    const total = scoreA + scoreB;
+    const rawWinA = scoreA / total;
+    const rawWinB = scoreB / total;
+
+    const drawProb = 0.23;
+    const winA = Math.round(rawWinA * (1 - drawProb) * 100);
+    const winB = Math.round(rawWinB * (1 - drawProb) * 100);
+    const draw = 100 - winA - winB;
+
+    let winner = "Draw";
+    let confidence = draw;
+    if (winA > winB) {
+      winner = tA.name;
+      confidence = winA;
+    } else if (winB > winA) {
+      winner = tB.name;
+      confidence = winB;
+    }
+
+    // Simulate scoreline
+    let goalsA = Math.max(0, Math.round(xG_A + (Math.random() * 0.8 - 0.4)));
+    let goalsB = Math.max(0, Math.round(xG_B + (Math.random() * 0.8 - 0.4)));
+
+    if (winA > winB + 5 && goalsA <= goalsB) {
+      goalsA = goalsB + 1;
+    } else if (winB > winA + 5 && goalsB <= goalsA) {
+      goalsB = goalsA + 1;
+    } else if (Math.abs(winA - winB) <= 5 && goalsA !== goalsB) {
+      if (Math.random() > 0.4) {
+        goalsA = goalsB = Math.min(goalsA, goalsB);
+      } else {
+        if (goalsA > goalsB) goalsA = goalsB + 1;
+        else goalsB = goalsA + 1;
+      }
+    }
+
+    // Generate Analysis
+    const analysisParts = [
+      `Tactical review shows ${tA.name} playing ${formationA || "4-3-3"} (${mentalityA || "balanced"}) against ${tB.name} in a ${formationB || "4-3-3"} (${mentalityB || "balanced"}) posture.`,
+      (tA.fifaRanking || 30) < (tB.fifaRanking || 30) - 10 ? `${tA.name} holds a strong ranking advantage.` : ((tB.fifaRanking || 30) < (tA.fifaRanking || 30) - 10 ? `${tB.name} has the ranking edge.` : "The squads are tightly matched on paper."),
+      `The Heuristic Simulator models an expected outcome of ${goalsA}-${goalsB} with a ${confidence}% probability backing ${winner === "Draw" ? "a Draw" : `${winner} win`}.`
+    ];
+
+    return {
+      teamA: tA.name,
+      teamB: tB.name,
+      prediction: {
+        winA,
+        draw,
+        winB,
+        winner,
+        confidence,
+        predictedScoreA: goalsA,
+        predictedScoreB: goalsB,
+        xG_A: Number(xG_A.toFixed(2)),
+        xG_B: Number(xG_B.toFixed(2)),
+        analysis: analysisParts.join(" "),
+        source: "Local Heuristic Prediction Engine (Browser Fallback)"
+      }
+    };
+  };
+
   const fetchAllMatches = async () => {
     try {
       const res = await fetch(`${API_BASE}/matches`);
-      if (res.ok) {
-        setMatches(normalizeMatchesForUi(await res.json()));
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      setMatches(normalizeMatchesForUi(data));
     } catch (err) {
       console.error("Error fetching all matches:", err);
     }
@@ -425,9 +605,9 @@ function App() {
   const fetchLiveMatches = async () => {
     try {
       const res = await fetch(`${API_BASE}/matches/live`);
-      if (res.ok) {
-        setLiveMatches(normalizeMatchesForUi(await res.json()));
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      setLiveMatches(normalizeMatchesForUi(data));
     } catch (err) {
       console.error("Error fetching live matches:", err);
     }
@@ -436,9 +616,9 @@ function App() {
   const fetchUpcomingMatches = async () => {
     try {
       const res = await fetch(`${API_BASE}/matches/upcoming`);
-      if (res.ok) {
-        setUpcomingMatches(normalizeMatchesForUi(await res.json()));
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      setUpcomingMatches(normalizeMatchesForUi(data));
     } catch (err) {
       console.error("Error fetching upcoming matches:", err);
     }
@@ -447,9 +627,9 @@ function App() {
   const fetchStandings = async () => {
     try {
       const res = await fetch(`${API_BASE}/standings`);
-      if (res.ok) {
-        setStandings(await res.json());
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const standingsGrouped = await res.json();
+      setStandings(standingsGrouped);
     } catch (err) {
       console.error("Error fetching standings:", err);
     }
@@ -458,10 +638,9 @@ function App() {
   const fetchTeams = async () => {
     try {
       const res = await fetch(`${API_BASE}/teams`);
-      if (res.ok) {
-        const data = await res.json();
-        setTeams(data);
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      setTeams(data);
     } catch (err) {
       console.error("Error fetching teams:", err);
     }
@@ -470,13 +649,12 @@ function App() {
   const fetchPlayers = async () => {
     try {
       const res = await fetch(`${API_BASE}/players`);
-      if (res.ok) {
-        const data = await res.json();
-        setPlayers(data);
-        if (data.length > 0) {
-          setSelectedPlayer(data[0]);
-          setComparePlayerId(data[1]?.id || "");
-        }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      setPlayers(data);
+      if (data.length > 0) {
+        setSelectedPlayer(data[0]);
+        setComparePlayerId(data[1]?.id || "");
       }
     } catch (err) {
       console.error("Error fetching players:", err);
@@ -492,7 +670,7 @@ function App() {
   }, [selectedTeam]);
 
   useEffect(() => {
-    if (selectedPlayer && !selectedPlayer.photo && !selectedPlayer.bio && !playerDetailsLoading) {
+    if (selectedPlayer && (!selectedPlayer.photo || !selectedPlayer.bio) && !playerDetailsLoading) {
       enrichSelectedPlayer(selectedPlayer);
     }
   }, [selectedPlayer]);
@@ -501,11 +679,16 @@ function App() {
     setSquadLoading(true);
     try {
       const res = await fetch(`${API_BASE}/teams/${teamId}/squad`);
-      if (res.ok) {
-        setActiveSquad(await res.json());
-      } else {
-        setActiveSquad([]);
-      }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      const mappedSquad = data.map(p => ({
+        id: p.id,
+        name: p.name,
+        position: p.position,
+        dateOfBirth: p.dateOfBirth || (p.age ? `${new Date().getFullYear() - p.age}-01-01` : "1995-01-01"),
+        nationality: p.nationality || p.team
+      }));
+      setActiveSquad(mappedSquad);
     } catch (err) {
       console.error("Error fetching squad:", err);
       setActiveSquad([]);
@@ -517,18 +700,19 @@ function App() {
   const enrichSelectedPlayer = async (player) => {
     try {
       const res = await fetch(`${API_BASE}/players/details?name=${encodeURIComponent(player.name)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.photo || data.bio) {
-          setSelectedPlayer(prev => ({
-            ...prev,
-            photo: data.photo,
-            bio: data.bio,
-            height: data.height,
-            weight: data.weight,
-            stats: data.stats
-          }));
-        }
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      if (data) {
+        const enriched = {
+          ...player,
+          photo: data.photo,
+          bio: data.bio,
+          height: data.height,
+          weight: data.weight,
+          stats: data.stats
+        };
+        setSelectedPlayer(enriched);
+        setPlayers(prev => prev.map(p => p.id === player.id ? enriched : p));
       }
     } catch (err) {
       console.warn("Failed to enrich selected player:", err.message);
@@ -546,38 +730,51 @@ function App() {
       name: squadPlayer.name,
       team: teamName,
       position: squadPlayer.position,
-      jersey: 11,
-      age: squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26,
-      club: "TBD",
+      jersey: squadPlayer.jersey || 11,
+      age: squadPlayer.age || (squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26),
+      club: squadPlayer.club || "TBD",
       traits: getDynamicTraits(squadPlayer.position),
-      stats: { goals: 0, assists: 0, games: 0, shotsPerGame: 0, passAccuracy: 80 },
+      stats: squadPlayer.stats || { goals: 0, assists: 0, games: 0, shotsPerGame: 0, passAccuracy: 80 },
       attributes: getDynamicAttributes(squadPlayer.position),
-      heatmap: getDynamicHeatmap(squadPlayer.position)
+      heatmap: getDynamicHeatmap(squadPlayer.position),
+      photo: squadPlayer.photo || null,
+      bio: squadPlayer.bio || null,
+      height: squadPlayer.height || null,
+      weight: squadPlayer.weight || null
     };
     setSelectedPlayer(initialPlayer);
+    
+    setPlayers(prev => {
+      if (!prev.some(p => p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase())) {
+        return [initialPlayer, ...prev];
+      }
+      return prev.map(p => (p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase()) ? initialPlayer : p);
+    });
 
     try {
       const res = await fetch(`${API_BASE}/players/details?name=${encodeURIComponent(squadPlayer.name)}`);
-      if (res.ok) {
-        const data = await res.json();
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      if (data) {
         const fullyEnriched = {
           id: squadPlayer.id,
           name: squadPlayer.name,
           team: teamName,
           position: squadPlayer.position,
-          jersey: 11,
-          age: squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26,
+          jersey: data.jersey || 11,
+          age: data.age || (squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26),
           club: data.club || "TBD",
-          traits: getDynamicTraits(squadPlayer.position),
-          stats: data.stats,
-          attributes: getDynamicAttributes(squadPlayer.position),
-          heatmap: getDynamicHeatmap(squadPlayer.position),
-          photo: data.photo,
-          bio: data.bio,
-          height: data.height,
-          weight: data.weight
+          traits: data.traits || getDynamicTraits(squadPlayer.position),
+          stats: data.stats || { goals: 0, assists: 0, games: 0, shotsPerGame: 0, passAccuracy: 80 },
+          attributes: data.attributes || getDynamicAttributes(squadPlayer.position),
+          heatmap: data.heatmap || getDynamicHeatmap(squadPlayer.position),
+          photo: data.photo || null,
+          bio: data.bio || null,
+          height: data.height || null,
+          weight: data.weight || null
         };
         setSelectedPlayer(fullyEnriched);
+        setPlayers(prev => prev.map(p => (p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase()) ? fullyEnriched : p));
       }
     } catch (err) {
       console.error("Error loading squad player details:", err);
@@ -589,8 +786,10 @@ function App() {
   const handleOpenMatchCenter = async (matchId) => {
     try {
       const res = await fetch(`${API_BASE}/matches/${matchId}`);
-      if (res.ok) {
-        setSelectedMatch(normalizeMatchForUi(await res.json()));
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+      const data = await res.json();
+      if (data) {
+        setSelectedMatch(normalizeMatchForUi(data));
         setModalOpen(true);
       }
     } catch (err) {
@@ -607,26 +806,32 @@ function App() {
     setPredictionLoading(true);
     setPredictionResult(null);
 
+    const payload = { 
+      teamA: predictTeamA, 
+      teamB: predictTeamB,
+      formationA,
+      mentalityA,
+      formationB,
+      mentalityB
+    };
+
     try {
       const res = await fetch(`${API_BASE}/predict/match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          teamA: predictTeamA, 
-          teamB: predictTeamB,
-          formationA,
-          mentalityA,
-          formationB,
-          mentalityB
-        })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         setPredictionResult(await res.json());
       } else {
-        setPredictionError("Server failed to compute prediction.");
+        console.warn("Express predict service returned non-200. Using local heuristics.");
+        const result = runLocalPrediction(predictTeamA, predictTeamB, payload);
+        setPredictionResult(result);
       }
-    } catch {
-      setPredictionError("Failed to connect to API Server.");
+    } catch (err) {
+      console.warn("Could not connect to prediction service. Using local heuristics fallback.", err.message);
+      const result = runLocalPrediction(predictTeamA, predictTeamB, payload);
+      setPredictionResult(result);
     } finally {
       setPredictionLoading(false);
     }
@@ -709,6 +914,16 @@ function App() {
 
   // Comparative Radar Data
   const comparePlayer = players.find(p => p.id === comparePlayerId);
+  const positionOrder = {
+    "All": 0,
+    "Goalkeeper": 1,
+    "Defender": 2,
+    "Midfielder": 3,
+    "Forward": 4
+  };
+  const positionOptions = ["All", ...Array.from(new Set(players.map(p => p.position).filter(Boolean)))].sort((a, b) => {
+    return (positionOrder[a] ?? 99) - (positionOrder[b] ?? 99);
+  });
   const radarData = selectedPlayer && comparePlayer ? selectedPlayer.attributes.map((attr, index) => ({
     subject: attr.label,
     [selectedPlayer.name]: attr.value,
@@ -833,16 +1048,7 @@ function App() {
 
                             {/* Home Flag Box */}
                             <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 flex items-center justify-center transition-all">
-                              {homeCrest && !crestErrors[`${match.id}-home`] ? (
-                                <img 
-                                  src={homeCrest} 
-                                  alt={`${homeName} Crest`} 
-                                  className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 object-contain drop-shadow-xl" 
-                                  onError={() => setCrestErrors(prev => ({ ...prev, [`${match.id}-home`]: true }))}
-                                />
-                              ) : (
-                                <span className="text-4xl sm:text-5xl md:text-6xl select-none filter drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]">{getFlagEmoji(match.homeFlag)}</span>
-                              )}
+                              {renderFlag(match.homeFlag, "w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32", "text-4xl sm:text-5xl md:text-6xl")}
                             </div>
 
                             {/* Home Team Name */}
@@ -886,16 +1092,7 @@ function App() {
 
                             {/* Away Flag Box */}
                             <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 flex items-center justify-center transition-all">
-                              {awayCrest && !crestErrors[`${match.id}-away`] ? (
-                                <img 
-                                  src={awayCrest} 
-                                  alt={`${awayName} Crest`} 
-                                  className="w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 object-contain drop-shadow-xl" 
-                                  onError={() => setCrestErrors(prev => ({ ...prev, [`${match.id}-away`]: true }))}
-                                />
-                              ) : (
-                                <span className="text-4xl sm:text-5xl md:text-6xl select-none filter drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]">{getFlagEmoji(match.awayFlag)}</span>
-                              )}
+                              {renderFlag(match.awayFlag, "w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32", "text-4xl sm:text-5xl md:text-6xl")}
                             </div>
 
                             {/* Away Team Name */}
@@ -1190,16 +1387,7 @@ function App() {
                       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 my-5">
                         <div className="team-cell flex flex-col items-center justify-center">
                           <div className="w-14 h-14 flex items-center justify-center mb-2 overflow-hidden transition-all">
-                            {homeCrest && !crestErrors[`${match.id}-home-card`] ? (
-                              <img 
-                                src={homeCrest} 
-                                alt={`${homeName} Crest`} 
-                                className="w-12 h-12 object-contain drop-shadow-md" 
-                                onError={() => setCrestErrors(prev => ({ ...prev, [`${match.id}-home-card`]: true }))}
-                              />
-                            ) : (
-                              <span className="text-3xl filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">{getFlagEmoji(match.homeFlag)}</span>
-                            )}
+                            {renderFlag(match.homeFlag, "w-12 h-12", "text-3xl")}
                           </div>
                           <span className="font-bold text-sm text-white leading-tight text-center">{homeName}</span>
                           <span className="text-[10px] text-white/35 uppercase font-bold mt-1">Home</span>
@@ -1220,16 +1408,7 @@ function App() {
 
                         <div className="team-cell flex flex-col items-center justify-center">
                           <div className="w-14 h-14 flex items-center justify-center mb-2 overflow-hidden transition-all">
-                            {awayCrest && !crestErrors[`${match.id}-away-card`] ? (
-                              <img 
-                                src={awayCrest} 
-                                alt={`${awayName} Crest`} 
-                                className="w-12 h-12 object-contain drop-shadow-md" 
-                                onError={() => setCrestErrors(prev => ({ ...prev, [`${match.id}-away-card`]: true }))}
-                              />
-                            ) : (
-                              <span className="text-3xl filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">{getFlagEmoji(match.awayFlag)}</span>
-                            )}
+                            {renderFlag(match.awayFlag, "w-12 h-12", "text-3xl")}
                           </div>
                           <span className="font-bold text-sm text-white leading-tight text-center">{awayName}</span>
                           <span className="text-[10px] text-white/35 uppercase font-bold mt-1">Away</span>
@@ -1416,28 +1595,26 @@ function App() {
                     <h4 className="text-xs font-semibold uppercase text-white/40 mb-2 tracking-wider">Tactical Probability Distribution</h4>
                     
                     <div className="relative w-64 h-64 flex items-center justify-center">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} debounce={1} style={{ width: '256px', height: '256px' }}>
-                        <PieChart>
-                          <Pie
-                            data={[
-                              { name: predictionResult.teamA, value: predictionResult.prediction.winA },
-                              { name: "Draw", value: predictionResult.prediction.draw },
-                              { name: predictionResult.teamB, value: predictionResult.prediction.winB }
-                            ]}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={70}
-                            outerRadius={90}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            <Cell fill="#00f0ff" />
-                            <Cell fill="rgba(255,255,255,0.2)" />
-                            <Cell fill="#ff2a5f" />
-                          </Pie>
-                          <Tooltip contentStyle={{ background: "#0d0f14", borderColor: "rgba(255,255,255,0.1)", borderRadius: "8px" }} />
-                        </PieChart>
-                      </ResponsiveContainer>
+                      <PieChart width={256} height={256}>
+                        <Pie
+                          data={[
+                            { name: predictionResult.teamA, value: predictionResult.prediction.winA },
+                            { name: "Draw", value: predictionResult.prediction.draw },
+                            { name: predictionResult.teamB, value: predictionResult.prediction.winB }
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={70}
+                          outerRadius={90}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          <Cell fill="#00f0ff" />
+                          <Cell fill="rgba(255,255,255,0.2)" />
+                          <Cell fill="#ff2a5f" />
+                        </Pie>
+                        <Tooltip contentStyle={{ background: "#0d0f14", borderColor: "rgba(255,255,255,0.1)", borderRadius: "8px" }} />
+                      </PieChart>
 
                       <div className="absolute text-center">
                         <span className="block text-[10px] text-white/40 uppercase tracking-widest">Confidence</span>
@@ -1477,6 +1654,59 @@ function App() {
                       </p>
                     </div>
 
+                    {/* Simulated Scoreline Card */}
+                    {predictionResult.prediction.predictedScoreA !== undefined && (
+                      <div className="bg-[#0b0e14] border border-[#00ff87]/20 p-4 rounded-xl flex flex-col items-center justify-center relative overflow-hidden shadow-[inset_0_0_15px_rgba(0,255,135,0.03)]">
+                        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#00ff87]/30 to-transparent" />
+                        <span className="text-[9px] text-white/40 uppercase font-bold tracking-widest mb-2.5">Simulated Scoreline</span>
+                        <div className="flex items-center justify-center gap-4 w-full">
+                          <div className="flex items-center gap-1.5 w-1/3 justify-end text-right">
+                            <span className="font-extrabold text-white text-xs truncate max-w-[80px]" title={predictionResult.teamA}>{predictionResult.teamA}</span>
+                            {renderFlag(teams.find(t => t.name.toLowerCase() === predictionResult.teamA.toLowerCase())?.flag, "w-6 h-6", "text-lg")}
+                          </div>
+                          <span className="text-2xl font-black text-[#00ff87] font-mono tracking-widest px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 min-w-[70px] text-center">
+                            {predictionResult.prediction.predictedScoreA} - {predictionResult.prediction.predictedScoreB}
+                          </span>
+                          <div className="flex items-center gap-1.5 w-1/3 justify-start text-left">
+                            {renderFlag(teams.find(t => t.name.toLowerCase() === predictionResult.teamB.toLowerCase())?.flag, "w-6 h-6", "text-lg")}
+                            <span className="font-extrabold text-white text-xs truncate max-w-[80px]" title={predictionResult.teamB}>{predictionResult.teamB}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Expected Goals (xG) Meter */}
+                    {predictionResult.prediction.xG_A !== undefined && (
+                      <div className="bg-white/5 border border-white/5 p-4 rounded-xl space-y-2.5">
+                        <div className="flex justify-between text-[10px] text-white/45 uppercase font-bold tracking-wider">
+                          <span className="flex items-center gap-1">Expected Goals (xG)</span>
+                          <span className="text-[#00f0ff] font-extrabold">{predictionResult.prediction.xG_A?.toFixed(2)} vs {predictionResult.prediction.xG_B?.toFixed(2)}</span>
+                        </div>
+                        <div className="relative h-2 bg-white/10 rounded-full overflow-hidden flex">
+                          <div 
+                            style={{ width: `${(predictionResult.prediction.xG_A / (predictionResult.prediction.xG_A + predictionResult.prediction.xG_B || 1)) * 100}%` }} 
+                            className="h-full bg-gradient-to-r from-cyan-500 to-[#00f0ff] transition-all duration-500" 
+                          />
+                          <div 
+                            style={{ width: `${(predictionResult.prediction.xG_B / (predictionResult.prediction.xG_A + predictionResult.prediction.xG_B || 1)) * 100}%` }} 
+                            className="h-full bg-gradient-to-l from-red-500 to-[#ff2a5f] transition-all duration-500" 
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Matchup Commentary */}
+                    {predictionResult.prediction.analysis && (
+                      <div className="bg-white/5 border border-white/5 p-4 rounded-xl space-y-2">
+                        <span className="text-[10px] text-yellow-400 uppercase font-bold tracking-wider flex items-center gap-1">
+                          <Cpu className="w-3.5 h-3.5 animate-pulse" /> Tactical Commentary
+                        </span>
+                        <p className="text-xs text-white/75 leading-relaxed italic border-l border-yellow-400/40 pl-3">
+                          "{predictionResult.prediction.analysis}"
+                        </p>
+                      </div>
+                    )}
+
                     {/* Tactical breakdown */}
                     <div className="bg-white/5 border border-white/5 p-4 rounded-xl text-xs space-y-2.5">
                       <h5 className="font-bold text-white/60 uppercase">Applied Rating Modifiers</h5>
@@ -1493,7 +1723,7 @@ function App() {
                         </span>
                       </div>
                       <div className="border-t border-white/5 pt-2 flex items-center gap-1 text-[10px] text-white/40 uppercase">
-                        <Zap className="w-3 h-3 text-yellow-400" /> Powered by FastAPI Engine
+                        <Zap className="w-3 h-3 text-yellow-400" /> {predictionResult?.prediction?.source ? `Powered by ${predictionResult.prediction.source}` : "Powered by FastAPI Engine"}
                       </div>
                     </div>
                   </div>
@@ -1537,9 +1767,17 @@ function App() {
                   onChange={(e) => setPlayerFilterPosition(e.target.value)}
                   className="bg-[#07090e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
                 >
-                  <option value="All">All Positions</option>
-                  <option value="Forward">Forwards</option>
-                  <option value="Midfielder">Midfielders</option>
+                  {positionOptions.map(pos => {
+                    let label = pos;
+                    if (pos === "All") label = "All Positions";
+                    else if (pos.toLowerCase() === "goalkeeper") label = "Goalkeepers";
+                    else if (pos.toLowerCase() === "defender") label = "Defenders";
+                    else if (pos.toLowerCase() === "midfielder") label = "Midfielders";
+                    else if (pos.toLowerCase() === "forward") label = "Forwards & Attackers";
+                    return (
+                      <option key={pos} value={pos}>{label}</option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
@@ -1594,18 +1832,33 @@ function App() {
                     <div 
                       key={p.id} 
                       onClick={() => setSelectedPlayer(p)}
-                      className={`glass-panel p-4 cursor-pointer border flex justify-between items-center transition-all ${
+                      className={`glass-panel p-3.5 cursor-pointer border flex items-center justify-between gap-3 transition-all ${
                         selectedPlayer?.id === p.id 
                           ? "border-purple-500/40 bg-purple-500/10 shadow-[0_0_12px_rgba(139,92,246,0.15)]" 
-                          : "border-transparent"
+                          : "border-transparent hover:bg-white/5 hover:border-white/10"
                       }`}
                     >
-                      <div>
-                        <div className="font-bold text-sm text-white">{p.name}</div>
-                        <div className="text-[10px] text-white/40 font-semibold uppercase">{p.team} • {p.position}</div>
+                      <div className="flex items-center gap-3 min-w-0">
+                        {/* Player Small Photo Avatar */}
+                        <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex-shrink-0 overflow-hidden flex items-center justify-center shadow-md">
+                          {getPlayerPhoto(p) ? (
+                            <img 
+                              src={getPlayerPhoto(p)} 
+                              alt="" 
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.currentTarget.src = ""; }}
+                            />
+                          ) : (
+                            <span className="text-lg">⚽</span>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-white truncate">{p.name}</div>
+                          <div className="text-[10px] text-white/40 font-semibold uppercase truncate">{p.team} • {p.position}</div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-xs px-2 py-1 bg-white/5 rounded text-white/80 font-extrabold font-mono">#{p.jersey}</span>
+                      <div className="text-right flex-shrink-0">
+                        <span className="text-xs px-2 py-1 bg-white/5 rounded text-white/80 font-extrabold font-mono">#{p.jersey || "--"}</span>
                       </div>
                     </div>
                   ))
@@ -1745,7 +1998,7 @@ function App() {
 
                       {comparePlayer ? (
                         <div className="w-full h-48 flex items-center justify-center bg-[#07090e]/40 rounded-xl border border-white/5">
-                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} debounce={1} style={{ width: '100%', height: '190px' }}>
+                          <ResponsiveContainer width="100%" height={180}>
                             <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData}>
                               <PolarGrid stroke="rgba(255,255,255,0.05)" />
                               <PolarAngleAxis dataKey="subject" stroke="rgba(255,255,255,0.6)" fontSize={9} />
@@ -1926,6 +2179,7 @@ function App() {
                               </span>
                             </td>
                             <td className="font-bold flex items-center gap-2 hover:text-[#00ff87] transition-colors">
+                              {renderFlag(team.flag, "w-6 h-6", "text-lg")}
                               <span>{team.name}</span>
                             </td>
                             <td className="text-center text-white/60 font-semibold">{team.played}</td>
@@ -1969,8 +2223,10 @@ function App() {
               
               {/* Score header */}
               <div className="flex items-center justify-between text-center border-b border-white/5 pb-6">
-                <div className="flex-1">
-                  <span className="text-4xl block mb-1">{selectedMatch.homeFlag}</span>
+                <div className="flex-1 flex flex-col items-center">
+                  <div className="h-16 flex items-center justify-center mb-1">
+                    {renderFlag(selectedMatch.homeFlag, "w-14 h-14", "text-4xl")}
+                  </div>
                   <span className="font-bold text-lg">{getTeamDisplayName(selectedMatch.homeTeam, getTeamDisplayName(selectedMatch.home))}</span>
                 </div>
                 <div className="px-4">
@@ -1981,8 +2237,10 @@ function App() {
                     {selectedMatch.status === "LIVE" ? `${selectedMatch.minute}' Played` : selectedMatch.status}
                   </div>
                 </div>
-                <div className="flex-1">
-                  <span className="text-4xl block mb-1">{selectedMatch.awayFlag}</span>
+                <div className="flex-1 flex flex-col items-center">
+                  <div className="h-16 flex items-center justify-center mb-1">
+                    {renderFlag(selectedMatch.awayFlag, "w-14 h-14", "text-4xl")}
+                  </div>
                   <span className="font-bold text-lg">{getTeamDisplayName(selectedMatch.awayTeam, getTeamDisplayName(selectedMatch.away))}</span>
                 </div>
               </div>

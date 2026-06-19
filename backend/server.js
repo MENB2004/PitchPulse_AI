@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
 import { mockMatches, mockTeams, mockPlayers } from "./mockData.js";
 
 dotenv.config();
@@ -8,6 +9,15 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn("Supabase URL or Key is missing from backend/.env configuration!");
+}
+
+const supabase = createClient(supabaseUrl || "https://placeholder.supabase.co", supabaseKey || "placeholder");
 
 const API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 const BASE_URL = "https://api.football-data.org/v4";
@@ -96,89 +106,164 @@ const slugify = (value = "") => String(value)
   .replace(/^_+|_+$/g, "");
 
 const countryCodesByName = {
+  algeria: "DZ",
   argentina: "AR",
   australia: "AU",
   austria: "AT",
   belgium: "BE",
+  bolivia: "BO",
   bosnia_herzegovina: "BA",
+  bosnia_and_herzegovina: "BA",
   brazil: "BR",
+  cameroon: "CM",
   canada: "CA",
   cape_verde_islands: "CV",
+  chile: "CL",
+  china_pr: "CN",
   colombia: "CO",
   congo_dr: "CD",
+  costa_rica: "CR",
+  cote_d_ivoire: "CI",
   croatia: "HR",
   curacao: "CW",
   czechia: "CZ",
+  czech_republic: "CZ",
+  denmark: "DK",
+  dr_congo: "CD",
   ecuador: "EC",
   egypt: "EG",
-  england: "GB",
+  england: "GB-ENG",
+  finland: "FI",
   france: "FR",
   germany: "DE",
   ghana: "GH",
+  greece: "GR",
   haiti: "HT",
+  honduras: "HN",
+  hungary: "HU",
+  iceland: "IS",
+  indonesia: "ID",
+  ir_iran: "IR",
   iran: "IR",
   iraq: "IQ",
+  ireland: "IE",
+  republic_of_ireland: "IE",
+  israel: "IL",
+  italy: "IT",
   ivory_coast: "CI",
+  jamaica: "JM",
   japan: "JP",
   jordan: "JO",
+  kenya: "KE",
+  korea_republic: "KR",
   mexico: "MX",
   morocco: "MA",
   netherlands: "NL",
   new_zealand: "NZ",
+  nigeria: "NG",
   norway: "NO",
   panama: "PA",
   paraguay: "PY",
+  peru: "PE",
+  poland: "PL",
   portugal: "PT",
   qatar: "QA",
+  romania: "RO",
+  russia: "RU",
   saudi_arabia: "SA",
-  scotland: "GB",
+  scotland: "GB-SCT",
   senegal: "SN",
+  serbia: "RS",
+  slovakia: "SK",
+  slovenia: "SI",
   south_africa: "ZA",
   south_korea: "KR",
   spain: "ES",
   sweden: "SE",
   switzerland: "CH",
+  trinidad_and_tobago: "TT",
   tunisia: "TN",
   turkey: "TR",
+  turkiye: "TR",
+  ukraine: "UA",
   united_states: "US",
   uruguay: "UY",
-  uzbekistan: "UZ"
+  uzbekistan: "UZ",
+  venezuela: "VE",
+  wales: "GB-WLS"
 };
 
 const tlaToCountryCode = {
-  ARG: "AR", AUS: "AU", AUT: "AT", BEL: "BE", BIH: "BA", BRA: "BR",
-  CAN: "CA", CIV: "CI", COD: "CD", COL: "CO", CPV: "CV", CRO: "HR",
-  CZE: "CZ", CUW: "CW", ECU: "EC", EGY: "EG", ENG: "GB", FRA: "FR",
-  GER: "DE", GHA: "GH", HAI: "HT", IRN: "IR", IRQ: "IQ", JOR: "JO",
-  JPN: "JP", KOR: "KR", KSA: "SA", MAR: "MA", MEX: "MX", NED: "NL",
-  NOR: "NO", NZL: "NZ", PAN: "PA", PAR: "PY", POR: "PT", QAT: "QA",
-  RSA: "ZA", SCO: "GB", SEN: "SN", ESP: "ES", SUI: "CH", SWE: "SE",
-  TUN: "TN", TUR: "TR", URY: "UY", USA: "US", UZB: "UZ"
+  ALG: "DZ", ARG: "AR", AUS: "AU", AUT: "AT", BEL: "BE", BIH: "BA", BOL: "BO", BRA: "BR",
+  CAN: "CA", CHI: "CL", CHN: "CN", CIV: "CI", CMR: "CM", COD: "CD", COL: "CO",
+  CPV: "CV", CRC: "CR", CRO: "HR", CZE: "CZ", CUW: "CW",
+  DEN: "DK", ECU: "EC", EGY: "EG", ENG: "GB-ENG", ESP: "ES",
+  FIN: "FI", FRA: "FR", GER: "DE", GHA: "GH", GRE: "GR",
+  HAI: "HT", HON: "HN", HUN: "HU", IDN: "ID", IRN: "IR", IRQ: "IQ", IRL: "IE", ISL: "IS", ISR: "IL", ITA: "IT",
+  JAM: "JM", JOR: "JO", JPN: "JP",
+  KEN: "KE", KOR: "KR", KSA: "SA",
+  MAR: "MA", MEX: "MX",
+  NED: "NL", NGA: "NG", NOR: "NO", NZL: "NZ",
+  PAN: "PA", PAR: "PY", PER: "PE", POL: "PL", POR: "PT",
+  QAT: "QA", ROM: "RO", RSA: "ZA", RUS: "RU",
+  SCO: "GB-SCT", SEN: "SN", SRB: "RS", SUI: "CH", SVK: "SK", SVN: "SI", SWE: "SE",
+  TRI: "TT", TUN: "TN", TUR: "TR",
+  UKR: "UA", URY: "UY", USA: "US", UZB: "UZ",
+  VEN: "VE", WAL: "GB-WLS"
 };
 
 
 
 const flagFromCountryCode = (code) => {
-  if (!code || code.length !== 2) return "\u26BD";
-  return String.fromCodePoint(...[...code.toUpperCase()].map(char => 127397 + char.charCodeAt(0)));
+  if (!code || code.length < 2) return "\u26BD";
+  // Handle GB-ENG, GB-SCT, GB-WLS sub-region codes
+  const base = code.includes("-") ? code.split("-")[0] : code;
+  return String.fromCodePoint(...[...base.toUpperCase()].map(char => 127397 + char.charCodeAt(0)));
+};
+
+// Returns a CDN URL for the country flag image (never rate-limited)
+const getFlagImageUrl = (countryCode) => {
+  if (!countryCode) return null;
+  // flagcdn.com supports ISO 3166-1 alpha-2 codes in lowercase
+  const base = countryCode.includes("-") ? countryCode.split("-")[0].toLowerCase() : countryCode.toLowerCase();
+  if (base.length !== 2) return null;
+  return `https://flagcdn.com/w160/${base}.png`;
+};
+
+const resolveCountryCode = (teamName, tla) => {
+  return tlaToCountryCode[tla?.toUpperCase()] || countryCodesByName[slugify(teamName)] || null;
 };
 
 const getCleanFlag = (teamName, tla) => {
-  const countryCode = tlaToCountryCode[tla?.toUpperCase()] || countryCodesByName[slugify(teamName)];
-  return flagFromCountryCode(countryCode);
+  const countryCode = resolveCountryCode(teamName, tla);
+  // Prefer the CDN image URL, fall back to emoji
+  return getFlagImageUrl(countryCode) || flagFromCountryCode(countryCode);
+};
+
+const getTeamFlagAndCrest = (team) => {
+  // Always resolve via our reliable flagcdn.com instead of crests.football-data.org
+  const tla = team.tla || (typeof team.id === 'string' && isNaN(Number(team.id)) ? team.id.slice(0, 3).toUpperCase() : null);
+  const countryCode = resolveCountryCode(team.name, tla);
+  const flagUrl = getFlagImageUrl(countryCode);
+  return {
+    flag: flagUrl || getCleanFlag(team.name, tla),
+    crest: flagUrl || null
+  };
 };
 
 const sortMatchesByDate = (matches) => [...matches].sort((a, b) => new Date(a.utcDate || 0) - new Date(b.utcDate || 0));
 
 const getTeamByName = (teamName) => mockTeams.find(team => slugify(team.name) === slugify(teamName));
 
-const buildTeamMeta = (teamName, tla, crest) => {
+const buildTeamMeta = (teamName, tla, crest, apiId) => {
   const localTeam = getTeamByName(teamName);
+  // Always prefer our reliable flag CDN over the API-provided crest URL
+  const reliableFlag = getCleanFlag(teamName || localTeam?.name, tla);
   return {
-    id: localTeam?.id || slugify(teamName || tla || "tbd"),
+    id: apiId ? String(apiId) : (localTeam?.id || slugify(teamName || tla || "tbd")),
     name: teamName || localTeam?.name || "TBD",
-    flag: getCleanFlag(teamName || localTeam?.name, tla),
-    crest: crest || null,
+    flag: reliableFlag,
+    crest: reliableFlag,
     ranking: localTeam?.fifaRanking || null,
     form: localTeam?.form || []
   };
@@ -314,8 +399,8 @@ const normalizeMatches = (apiMatches) => {
     const homeName = (typeof rawHomeName === "string" && rawHomeName.trim()) ? rawHomeName : (typeof m.homeTeam === "string" ? m.homeTeam : "TBD");
     const awayName = (typeof rawAwayName === "string" && rawAwayName.trim()) ? rawAwayName : (typeof m.awayTeam === "string" ? m.awayTeam : "TBD");
 
-    const homeMeta = buildTeamMeta(homeName, m.homeTeam?.tla, m.homeTeam?.crest);
-    const awayMeta = buildTeamMeta(awayName, m.awayTeam?.tla, m.awayTeam?.crest);
+    const homeMeta = buildTeamMeta(homeName, m.homeTeam?.tla, m.homeTeam?.crest, m.homeTeam?.id);
+    const awayMeta = buildTeamMeta(awayName, m.awayTeam?.tla, m.awayTeam?.crest, m.awayTeam?.id);
     const timeline = status !== "UPCOMING" 
       ? generateTimeline(homeName, awayName, homeScore, awayScore)
       : [];
@@ -371,7 +456,7 @@ const normalizeStandings = (apiStandings) => {
       };
 
       return {
-        id: row.team.tla?.toLowerCase() || row.team.name.toLowerCase(),
+        id: String(row.team.id),
         name: row.team.name,
         group: letter,
         played: row.playedGames,
@@ -397,55 +482,110 @@ const getNormalizedMatches = async () => {
   try {
     const raw = await fetchFromFootballData("/competitions/WC/matches", "matches");
     if (raw && raw.matches) {
-      return normalizeMatches(raw.matches);
+      const normalized = normalizeMatches(raw.matches);
+
+      // Collect all unique teams to prevent foreign key issues
+      const uniqueTeams = new Map();
+      normalized.forEach(m => {
+        if (m.homeId) {
+          uniqueTeams.set(m.homeId, {
+            id: m.homeId,
+            name: m.homeTeam,
+            group: m.home.group || "A",
+            played: 0,
+            won: 0,
+            drawn: 0,
+            lost: 0,
+            gf: 0,
+            ga: 0,
+            pts: 0,
+            fifaRanking: m.home.ranking || 50,
+            attackPower: 75,
+            defenseRating: 75,
+            form: m.home.form || ["D"],
+            h2h: {}
+          });
+        }
+        if (m.awayId) {
+          uniqueTeams.set(m.awayId, {
+            id: m.awayId,
+            name: m.awayTeam,
+            group: m.away.group || "A",
+            played: 0,
+            won: 0,
+            drawn: 0,
+            lost: 0,
+            gf: 0,
+            ga: 0,
+            pts: 0,
+            fifaRanking: m.away.ranking || 50,
+            attackPower: 75,
+            defenseRating: 75,
+            form: m.away.form || ["D"],
+            h2h: {}
+          });
+        }
+      });
+
+      // Query existing teams in Supabase
+      const { data: existingTeams } = await supabase.from('teams').select('id');
+      const existingIds = new Set((existingTeams || []).map(t => t.id));
+
+      const missingTeams = [];
+      uniqueTeams.forEach((team, id) => {
+        if (!existingIds.has(id)) {
+          missingTeams.push(team);
+        }
+      });
+
+      if (missingTeams.length > 0) {
+        console.log(`[Database Sync] Found ${missingTeams.length} missing teams. Inserting them to prevent foreign key violations...`);
+        const { error: teamsError } = await supabase.from('teams').insert(missingTeams);
+        if (teamsError) {
+          console.error("Error inserting missing teams:", teamsError.message);
+        }
+      }
+
+      const dbMatches = normalized.map(m => ({
+        id: m.id,
+        status: m.status,
+        minute: m.minute,
+        day: m.day,
+        date: m.date,
+        utcDate: m.utcDate ? new Date(m.utcDate).toISOString() : null,
+        homeTeam: m.homeTeam,
+        awayTeam: m.awayTeam,
+        homeId: m.homeId,
+        awayId: m.awayId,
+        homeScore: m.homeScore,
+        awayScore: m.awayScore,
+        homeFlag: m.homeFlag,
+        awayFlag: m.awayFlag,
+        stats: m.stats,
+        lineups: m.lineups,
+        timeline: m.timeline,
+        predictProb: m.predictProb
+      }));
+      const { error } = await supabase.from('matches').upsert(dbMatches);
+      if (error) console.error("Error syncing matches to Supabase matches table:", error.message);
     }
   } catch (err) {
-    console.warn("External matches fetch failed, using local mock data. Reason:", err.message);
+    console.warn("External matches fetch failed. Serving from Supabase cache. Reason:", err.message);
   }
-  
-  // Inject relative, dynamic timestamps for mockMatches to center them in a 48h window relative to server time
-  const now = new Date();
-  let completedCount = 0;
-  let liveCount = 0;
-  let upcomingCount = 0;
 
-  const normalized = mockMatches.map((m) => {
-    let dateObj;
-    if (m.status === "COMPLETED") {
-      const hoursAgo = completedCount === 0 ? 10 : 18;
-      dateObj = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-      completedCount++;
-    } else if (m.status === "LIVE") {
-      const hoursAgo = liveCount === 0 ? 1.5 : 0.5;
-      dateObj = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-      liveCount++;
-    } else {
-      const hoursAhead = upcomingCount === 0 ? 6 : 16;
-      dateObj = new Date(now.getTime() + hoursAhead * 60 * 60 * 1000);
-      upcomingCount++;
-    }
+  const { data: dbMatches, error } = await supabase
+    .from('matches')
+    .select('*')
+    .order('utcDate', { ascending: true });
 
-    const dateStr = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ", " + 
-                    dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (error) {
+    console.error("Error reading matches from Supabase:", error.message);
+    return [];
+  }
 
-    const homeMeta = buildTeamMeta(m.homeTeam, null, m.home?.crest);
-    const awayMeta = buildTeamMeta(m.awayTeam, null, m.away?.crest);
-
-    return {
-      ...m,
-      source: "local-fallback",
-      home: homeMeta,
-      away: awayMeta,
-      homeId: homeMeta.id,
-      awayId: awayMeta.id,
-      homeFlag: homeMeta.flag,
-      awayFlag: awayMeta.flag,
-      utcDate: dateObj.toISOString(),
-      date: dateStr
-    };
-  });
-
-  return sortMatchesByDate(normalized);
+  // Filter out any mock matches (football-data.org match IDs are purely numeric)
+  const originalMatches = (dbMatches || []).filter(m => !isNaN(Number(m.id)));
+  return originalMatches;
 };
 
 // Logger middleware
@@ -482,14 +622,6 @@ app.get("/api/matches/by-day/:day", async (req, res) => {
   res.json(filtered);
 });
 
-// Filter matches by team
-app.get("/api/matches/by-team/:teamId", async (req, res) => {
-  const teamId = req.params.teamId.toLowerCase();
-  const list = await getNormalizedMatches();
-  const filtered = sortMatchesByDate(list.filter(m => m.homeId === teamId || m.awayId === teamId));
-  res.json(filtered);
-});
-
 // Match Details by ID
 app.get("/api/matches/:id", async (req, res) => {
   const list = await getNormalizedMatches();
@@ -504,18 +636,67 @@ app.get("/api/standings", async (req, res) => {
     const raw = await fetchFromFootballData("/competitions/WC/standings", "standings");
     if (raw && raw.standings) {
       const standings = normalizeStandings(raw.standings);
-      return res.json(standings);
+      const flattenedTeams = [];
+      Object.keys(standings).forEach(letter => {
+        standings[letter].forEach(team => {
+          flattenedTeams.push({
+            id: team.id,
+            name: team.name,
+            group: team.group,
+            played: team.played,
+            won: team.won,
+            drawn: team.drawn,
+            lost: team.lost,
+            gf: team.gf,
+            ga: team.ga,
+            pts: team.pts,
+            "fifaRanking": team.fifaRanking,
+            "attackPower": team.attackPower,
+            "defenseRating": team.defenseRating,
+            form: team.form,
+            h2h: team.h2h
+          });
+        });
+      });
+      const { error } = await supabase.from('teams').upsert(flattenedTeams);
+      if (error) console.error("Error syncing standings teams to Supabase:", error.message);
     }
   } catch (err) {
-    console.warn("External standings fetch failed, using local mock data. Reason:", err.message);
+    console.warn("External standings fetch failed. Serving from Supabase. Reason:", err.message);
   }
 
-  // Fallback to local standings
+  const { data: dbTeams, error } = await supabase
+    .from('teams')
+    .select('*');
+
+  if (error) {
+    console.error("Error reading teams from Supabase for standings:", error.message);
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Filter teams. If we have real tournament teams (numeric IDs), show them.
+  // Otherwise fall back to mock teams.
+  const realTeams = dbTeams.filter(team => !isNaN(Number(team.id)));
+  const teamsToShow = realTeams.length > 0 ? realTeams : dbTeams;
+
   const standings = {};
-  mockTeams.forEach(team => {
-    if (!standings[team.group]) standings[team.group] = [];
-    standings[team.group].push(team);
+  teamsToShow.forEach(team => {
+    if (!team.group) return; // Ignore teams without group
+    const cleanGroup = team.group.replace("Group ", "").replace("GROUP_", "").trim();
+    
+    // Attach flag & crest dynamically
+    const meta = getTeamFlagAndCrest(team);
+    const teamWithFlag = {
+      ...team,
+      group: cleanGroup,
+      flag: meta.flag,
+      crest: meta.crest
+    };
+
+    if (!standings[cleanGroup]) standings[cleanGroup] = [];
+    standings[cleanGroup].push(teamWithFlag);
   });
+  
   Object.keys(standings).forEach(group => {
     standings[group].sort((a, b) => b.pts - a.pts);
   });
@@ -532,6 +713,7 @@ app.get("/api/teams/:id/squad", async (req, res) => {
     return res.json(squadCache[teamId].data);
   }
 
+  let teamName = "";
   try {
     console.log(`[Cache Miss] Fetching squad for team ${teamId} from football-data.org...`);
     const response = await fetch(`${BASE_URL}/teams/${teamId}`, {
@@ -542,6 +724,7 @@ app.get("/api/teams/:id/squad", async (req, res) => {
     }
     const data = await response.json();
     const squad = data.squad || [];
+    teamName = data.name || "";
     const result = squad.map(p => ({
       id: String(p.id),
       name: p.name,
@@ -550,14 +733,60 @@ app.get("/api/teams/:id/squad", async (req, res) => {
       nationality: p.nationality
     }));
 
+    // Save squad to Supabase players table
+    if (squad.length > 0) {
+      const dbPlayers = squad.map(p => {
+        const age = p.dateOfBirth ? new Date().getFullYear() - new Date(p.dateOfBirth).getFullYear() : 26;
+        const normPos = normalizePosition(p.position);
+        return {
+          id: String(p.id),
+          name: p.name,
+          team: teamName,
+          position: normPos,
+          jersey: p.shirtNumber || null,
+          age: age,
+          club: data.name || null,
+          traits: getDynamicTraits(normPos),
+          stats: { goals: 0, assists: 0, games: 0, passAccuracy: 80 },
+          attributes: getDynamicAttributes(normPos),
+          heatmap: getDynamicHeatmap(normPos)
+        };
+      });
+      const { error } = await supabase.from('players').upsert(dbPlayers);
+      if (error) console.error("Error caching squad players to Supabase:", error.message);
+    }
+
     squadCache[teamId] = { data: result, timestamp: now };
-    res.json(result);
+    return res.json(result);
   } catch (err) {
-    console.warn(`Squad fetch failed for team ${teamId}, using mock players. Reason:`, err.message);
-    const team = mockTeams.find(t => t.id === teamId || String(t.fifaRanking) === teamId || t.name.toLowerCase() === teamId.toLowerCase());
-    const teamName = team ? team.name : "";
-    const squad = mockPlayers.filter(p => p.team.toLowerCase() === teamName.toLowerCase());
+    console.warn(`Squad fetch failed for team ${teamId}, using cached database players or mocks. Reason:`, err.message);
     
+    // Find the team name for this teamId
+    const team = mockTeams.find(t => t.id === teamId || String(t.fifaRanking) === teamId || t.name.toLowerCase() === teamId.toLowerCase());
+    teamName = team ? team.name : "";
+
+    // Fetch players for this team from Supabase
+    if (teamName) {
+      const { data: dbPlayersList, error } = await supabase
+        .from('players')
+        .select('*')
+        .ilike('team', teamName);
+        
+      if (!error && dbPlayersList && dbPlayersList.length > 0) {
+        const result = dbPlayersList.map(p => ({
+          id: p.id,
+          name: p.name,
+          position: p.position,
+          dateOfBirth: p.age ? `${new Date().getFullYear() - p.age}-01-01` : "1995-01-01",
+          nationality: p.team
+        }));
+        squadCache[teamId] = { data: result, timestamp: now };
+        return res.json(result);
+      }
+    }
+
+    // Ultimate fallback to mock players
+    const squad = mockPlayers.filter(p => p.team.toLowerCase() === teamName.toLowerCase());
     const result = squad.length > 0 ? squad.map(p => ({
       id: p.id,
       name: p.name,
@@ -573,6 +802,21 @@ app.get("/api/teams/:id/squad", async (req, res) => {
   }
 });
 
+const teamIdMap = {
+  "Belgium": 1, "France": 2, "Croatia": 3, "Brazil": 6, "Uruguay": 7, "Spain": 9,
+  "England": 10, "Japan": 12, "Senegal": 13, "Serbia": 14, "Switzerland": 15,
+  "Mexico": 16, "South Korea": 17, "Australia": 20, "Denmark": 21, "Iran": 22,
+  "Saudi Arabia": 23, "Poland": 24, "Germany": 25, "Argentina": 26, "Portugal": 27,
+  "Tunisia": 28, "Costa Rica": 29, "Morocco": 31, "Wales": 767, "Netherlands": 1118,
+  "Ghana": 1504, "Cameroon": 1530, "Qatar": 1569, "Ecuador": 2382, "USA": 2384,
+  "United States": 2384, "Canada": 5529, "Colombia": 8, "Italy": 779, "Sweden": 783,
+  "Paraguay": 18, "Egypt": 22, "South Africa": 797, "Turkey": 786, "Austria": 793,
+  "Ivory Coast": 24, "Algeria": 28, "Norway": 782, "Scotland": 785, "Panama": 19,
+  "Czechia": 788, "Bosnia-Herzegovina": 790, "Iraq": 1539, "Cape Verde Islands": 1514,
+  "New Zealand": 2238, "Jordan": 1555, "Uzbekistan": 1558, "Congo DR": 1506,
+  "Haiti": 1565, "Curaçao": 2379
+};
+
 // Search player details, photo and stats using TheSportsDB and API-Football
 app.get("/api/players/details", async (req, res) => {
   const playerName = req.query.name;
@@ -580,6 +824,33 @@ app.get("/api/players/details", async (req, res) => {
 
   const now = Date.now();
   const cacheKey = playerName.trim().toLowerCase();
+  let cachedPlayerRecord = null;
+
+  // Try Supabase cache first
+  try {
+    const { data: dbPlayer, error: dbError } = await supabase
+      .from('players')
+      .select('*')
+      .ilike('name', playerName)
+      .maybeSingle();
+
+    if (!dbError && dbPlayer) {
+      cachedPlayerRecord = dbPlayer;
+      if (dbPlayer.photo && dbPlayer.bio) {
+        console.log(`[Cache Hit] Serving player details for "${playerName}" from Supabase.`);
+        return res.json({
+          name: dbPlayer.name,
+          photo: dbPlayer.photo,
+          bio: dbPlayer.bio,
+          height: dbPlayer.height,
+          weight: dbPlayer.weight,
+          stats: dbPlayer.stats
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Supabase player fetch failed, continuing to live fetching:", err.message);
+  }
 
   if (playerDetailsCache[cacheKey] && (now - playerDetailsCache[cacheKey].timestamp < cacheDurations.player)) {
     console.log(`[Cache Hit] Serving player details for "${playerName}" from memory cache.`);
@@ -627,7 +898,17 @@ app.get("/api/players/details", async (req, res) => {
   // 2. Fetch stats from API-Football if key is configured
   if (API_FOOTBALL_KEY && API_FOOTBALL_KEY.trim() !== "") {
     try {
-      const apiFootballUrl = `https://v3.football.api-sports.io/players?search=${encodeURIComponent(playerName)}`;
+      let apiFootballUrl = `https://v3.football.api-sports.io/players?search=${encodeURIComponent(playerName)}`;
+      
+      // If we know the team, append it to satisfy API validation
+      if (cachedPlayerRecord && cachedPlayerRecord.team) {
+        const teamId = teamIdMap[cachedPlayerRecord.team];
+        if (teamId) {
+          apiFootballUrl += `&team=${teamId}&season=2022`;
+        }
+      }
+
+      console.log(`[API-Football] Querying URL: ${apiFootballUrl}`);
       const response = await fetch(apiFootballUrl, {
         headers: {
           "x-apisports-key": API_FOOTBALL_KEY
@@ -637,6 +918,17 @@ app.get("/api/players/details", async (req, res) => {
         const statsData = await response.json();
         if (statsData.response && statsData.response.length > 0) {
           const item = statsData.response[0];
+          
+          if (!photo && item.player?.photo) {
+            photo = item.player.photo;
+          }
+          if (!height && item.player?.height) {
+            height = item.player.height;
+          }
+          if (!weight && item.player?.weight) {
+            weight = item.player.weight;
+          }
+
           const s = item.statistics?.[0] || {};
           stats = {
             goals: s.goals?.total || 0,
@@ -679,42 +971,85 @@ app.get("/api/players/details", async (req, res) => {
     stats
   };
 
+  // Cache back to Supabase if player exists
+  try {
+    if (cachedPlayerRecord) {
+      await supabase
+        .from('players')
+        .update({ photo, bio, height, weight, stats })
+        .eq('id', cachedPlayerRecord.id);
+      console.log(`[Database Cache] Saved player details for "${playerName}" back to Supabase.`);
+    }
+  } catch (err) {
+    console.error("Error writing player details cache to Supabase:", err.message);
+  }
+
   playerDetailsCache[cacheKey] = { data: result, timestamp: now };
   res.json(result);
 });
 
 // Teams List
-app.get("/api/teams", (req, res) => {
-  res.json(mockTeams);
+app.get("/api/teams", async (req, res) => {
+  const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  
+  const enriched = data.map(team => {
+    const meta = getTeamFlagAndCrest(team);
+    return {
+      ...team,
+      group: team.group ? team.group.replace("Group ", "").replace("GROUP_", "").trim() : "A",
+      flag: meta.flag,
+      crest: meta.crest
+    };
+  });
+  res.json(enriched);
 });
 
 // Players List
-app.get("/api/players", (req, res) => {
-  res.json(mockPlayers);
+app.get("/api/players", async (req, res) => {
+  const { data, error } = await supabase.from('players').select('*').order('name', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // Player by ID
-app.get("/api/players/:id", (req, res) => {
-  const player = mockPlayers.find(p => p.id === req.params.id);
-  if (!player) return res.status(404).json({ error: "Player not found" });
-  res.json(player);
+app.get("/api/players/:id", async (req, res) => {
+  const { data, error } = await supabase.from('players').select('*').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: "Player not found" });
+  res.json(data);
 });
 
-// Local Heuristic Prediction fallback logic
+// Filter matches by team
+app.get("/api/matches/by-team/:teamId", async (req, res) => {
+  const teamId = req.params.teamId.toLowerCase();
+  const list = await getNormalizedMatches();
+  const filtered = sortMatchesByDate(list.filter(m => m.homeId === teamId || m.awayId === teamId));
+  res.json(filtered);
+});
+
 const runLocalPrediction = (teamA, teamB, options = {}) => {
-  const { formationA, mentalityA, formationB, mentalityB } = options;
+  const { formationA, mentalityA, formationB, mentalityB, teamAStats, teamBStats } = options;
 
-  const tA = mockTeams.find(t => t.id === teamA.toLowerCase() || t.name.toLowerCase() === teamA.toLowerCase()) || {
-    name: teamA, fifaRanking: 30, attackPower: 75, defenseRating: 75, form: ["D"]
+  const statsA = teamAStats || {
+    rank: 35,
+    attack: 75,
+    defense: 75,
+    form: ["D"],
+    h2h: {}
   };
-  const tB = mockTeams.find(t => t.id === teamB.toLowerCase() || t.name.toLowerCase() === teamB.toLowerCase()) || {
-    name: teamB, fifaRanking: 30, attackPower: 75, defenseRating: 75, form: ["D"]
+  const statsB = teamBStats || {
+    rank: 35,
+    attack: 75,
+    defense: 75,
+    form: ["D"],
+    h2h: {}
   };
 
-  let attackA = tA.attackPower;
-  let defenseA = tA.defenseRating;
-  let attackB = tB.attackPower;
-  let defenseB = tB.defenseRating;
+  let attackA = statsA.attack;
+  let defenseA = statsA.defense;
+  let attackB = statsB.attack;
+  let defenseB = statsB.defense;
 
   if (mentalityA === "attacking") { attackA *= 1.15; defenseA *= 0.88; }
   else if (mentalityA === "defensive") { defenseA *= 1.15; attackA *= 0.88; }
@@ -723,8 +1058,8 @@ const runLocalPrediction = (teamA, teamB, options = {}) => {
   else if (mentalityB === "defensive") { defenseB *= 1.15; attackB *= 0.88; }
 
   const getFormationModifier = (f) => {
-    if (["5-4-1", "4-5-1", "5-3-2"].includes(f)) return { att: 0.92, def: 1.12 };
-    if (["4-3-3", "3-4-3", "4-2-4"].includes(f)) return { att: 1.10, def: 0.94 };
+    if (["5-4-1", "4-5-1", "5-3-2"].includes(f)) return { att: 0.90, def: 1.15 };
+    if (["4-3-3", "3-4-3", "4-2-4"].includes(f)) return { att: 1.12, def: 0.92 };
     return { att: 1.05, def: 1.05 };
   };
 
@@ -739,10 +1074,12 @@ const runLocalPrediction = (teamA, teamB, options = {}) => {
     defenseB *= mod.def;
   }
 
-  const rankStrengthA = Math.max(1, 100 - tA.fifaRanking);
-  const rankStrengthB = Math.max(1, 100 - tB.fifaRanking);
+  const rankStrengthA = Math.max(10, 100 - statsA.rank);
+  const rankStrengthB = Math.max(10, 100 - statsB.rank);
 
   const getFormScore = (formArray) => {
+    if (typeof formArray === "number") return formArray;
+    if (!Array.isArray(formArray) || formArray.length === 0) return 60.0;
     return formArray.reduce((acc, val) => {
       if (val === "W") return acc + 3;
       if (val === "D") return acc + 1;
@@ -750,31 +1087,96 @@ const runLocalPrediction = (teamA, teamB, options = {}) => {
     }, 0) / (formArray.length * 3) * 100;
   };
 
-  const formA = getFormScore(tA.form);
-  const formB = getFormScore(tB.form);
+  const formScoreA = getFormScore(statsA.form);
+  const formScoreB = getFormScore(statsB.form);
 
-  const scoreA = (0.35 * rankStrengthA) + (0.25 * formA) + (0.20 * attackA) + (0.20 * defenseA);
-  const scoreB = (0.35 * rankStrengthB) + (0.25 * formB) + (0.20 * attackB) + (0.20 * defenseB);
+  // H2H modifier calculation
+  let h2hModA = 1.0;
+  let h2hModB = 1.0;
+  const teamBKey = teamB.toLowerCase().replace(/[-\s]+/g, "_");
+  const h2hData = statsA.h2h?.[teamBKey] || statsA.h2h?.[teamB.toLowerCase()];
+  if (h2hData && typeof h2hData === "string" && h2hData.includes("-")) {
+    try {
+      const parts = h2hData.split("-").map(Number);
+      const wins = parts[0] || 0;
+      const draws = parts[1] || 0;
+      const losses = parts[2] || 0;
+      const total = wins + draws + losses;
+      if (total > 0) {
+        h2hModA = 1.0 + ((wins - losses) / (total * 10));
+        h2hModB = 2.0 - h2hModA;
+      }
+    } catch (e) {}
+  }
+
+  // Expected Goals (xG)
+  const xG_A = Math.max(0.2, (attackA / (defenseB + 5)) * (formScoreA / 75.0) * h2hModA * 1.35);
+  const xG_B = Math.max(0.2, (attackB / (defenseA + 5)) * (formScoreB / 75.0) * h2hModB * 1.35);
+
+  let scoreA = (0.35 * rankStrengthA) + (0.25 * formScoreA) + (0.20 * attackA) + (0.20 * defenseA);
+  let scoreB = (0.35 * rankStrengthB) + (0.25 * formScoreB) + (0.20 * attackB) + (0.20 * defenseB);
+
+  scoreA *= h2hModA;
+  scoreB *= h2hModB;
 
   const total = scoreA + scoreB;
   const rawWinA = scoreA / total;
   const rawWinB = scoreB / total;
 
-  const drawProb = 0.22;
+  const drawProb = 0.23;
   const winA = Math.round(rawWinA * (1 - drawProb) * 100);
   const winB = Math.round(rawWinB * (1 - drawProb) * 100);
   const draw = 100 - winA - winB;
 
+  let winner = "Draw";
+  let confidence = draw;
+  if (winA > winB) {
+    winner = teamA;
+    confidence = winA;
+  } else if (winB > winA) {
+    winner = teamB;
+    confidence = winB;
+  }
+
+  // Simulate scoreline
+  let goalsA = Math.max(0, Math.round(xG_A + (Math.random() * 0.8 - 0.4)));
+  let goalsB = Math.max(0, Math.round(xG_B + (Math.random() * 0.8 - 0.4)));
+
+  if (winA > winB + 5 && goalsA <= goalsB) {
+    goalsA = goalsB + 1;
+  } else if (winB > winA + 5 && goalsB <= goalsA) {
+    goalsB = goalsA + 1;
+  } else if (Math.abs(winA - winB) <= 5 && goalsA !== goalsB) {
+    if (Math.random() > 0.4) {
+      goalsA = goalsB = Math.min(goalsA, goalsB);
+    } else {
+      if (goalsA > goalsB) goalsA = goalsB + 1;
+      else goalsB = goalsA + 1;
+    }
+  }
+
+  // Generate Analysis
+  const analysisParts = [
+    `Tactical review shows ${teamA} playing ${formationA || "4-3-3"} (${mentalityA || "balanced"}) against ${teamB} in a ${formationB || "4-3-3"} (${mentalityB || "balanced"}) posture.`,
+    statsA.rank < statsB.rank - 10 ? `${teamA} holds a strong ranking advantage.` : (statsB.rank < statsA.rank - 10 ? `${teamB} has the ranking edge.` : "The squads are tightly matched on paper."),
+    `The Heuristic Simulator models an expected outcome of ${goalsA}-${goalsB} with a ${confidence}% probability backing ${winner === "Draw" ? "a Draw" : `${winner} win`}.`
+  ];
+
   return {
-    teamA: tA.name,
-    teamB: tB.name,
+    teamA,
+    teamB,
     prediction: {
       winA,
       draw,
       winB,
-      winner: winA > winB ? tA.name : (winB > winA ? tB.name : "Draw"),
-      confidence: Math.max(winA, winB),
-      source: "Local Heuristic Fallback"
+      winner,
+      confidence,
+      predictedScoreA: goalsA,
+      predictedScoreB: goalsB,
+      xG_A: Number(xG_A.toFixed(2)),
+      xG_B: Number(xG_B.toFixed(2)),
+      analysis: analysisParts.join(" "),
+      source: "Local Heuristic Prediction Engine"
     }
   };
 };
@@ -786,7 +1188,59 @@ app.post("/api/predict/match", async (req, res) => {
     return res.status(400).json({ error: "teamA and teamB are required in the request body" });
   }
 
-  const payload = { teamA, teamB, formationA, mentalityA, formationB, mentalityB };
+  // 1. Fetch real-time stats from database
+  let teamAData = null;
+  let teamBData = null;
+  try {
+    const { data: dbA } = await supabase.from('teams').select('*').ilike('name', teamA).maybeSingle();
+    const { data: dbB } = await supabase.from('teams').select('*').ilike('name', teamB).maybeSingle();
+    teamAData = dbA;
+    teamBData = dbB;
+  } catch (err) {
+    console.warn("Failed to fetch team data from Supabase for predictor:", err.message);
+  }
+
+  const localA = mockTeams.find(t => t.name.toLowerCase() === teamA.toLowerCase() || t.id.toLowerCase() === teamA.toLowerCase()) || {
+    fifaRanking: 35, attackPower: 75, defenseRating: 75, form: ["D"], h2h: {}
+  };
+  const localB = mockTeams.find(t => t.name.toLowerCase() === teamB.toLowerCase() || t.id.toLowerCase() === teamB.toLowerCase()) || {
+    fifaRanking: 35, attackPower: 75, defenseRating: 75, form: ["D"], h2h: {}
+  };
+
+  const payload = {
+    teamA,
+    teamB,
+    formationA: formationA || "4-3-3",
+    mentalityA: mentalityA || "balanced",
+    formationB: formationB || "4-3-3",
+    mentalityB: mentalityB || "balanced",
+    teamAStats: teamAData ? {
+      rank: teamAData.fifaRanking || 35,
+      attack: teamAData.attackPower || 75,
+      defense: teamAData.defenseRating || 75,
+      form: teamAData.form || ["D"],
+      h2h: teamAData.h2h || {}
+    } : {
+      rank: localA.fifaRanking || 35,
+      attack: localA.attackPower || 75,
+      defense: localA.defenseRating || 75,
+      form: localA.form || ["D"],
+      h2h: localA.h2h || {}
+    },
+    teamBStats: teamBData ? {
+      rank: teamBData.fifaRanking || 35,
+      attack: teamBData.attackPower || 75,
+      defense: teamBData.defenseRating || 75,
+      form: teamBData.form || ["D"],
+      h2h: teamBData.h2h || {}
+    } : {
+      rank: localB.fifaRanking || 35,
+      attack: localB.attackPower || 75,
+      defense: localB.defenseRating || 75,
+      form: localB.form || ["D"],
+      h2h: localB.h2h || {}
+    }
+  };
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/predict/match`, {
@@ -811,6 +1265,270 @@ app.post("/api/predict/match", async (req, res) => {
   }
 });
 
+function normalizePosition(pos) {
+  if (!pos) return "Forward";
+  const p = pos.toLowerCase();
+  if (p.includes("goalkeeper") || p === "gk") return "Goalkeeper";
+  if (p.includes("defence") || p.includes("defender") || p === "df" || p.includes("back")) return "Defender";
+  if (p.includes("midfield") || p.includes("midfielder") || p === "mf") return "Midfielder";
+  if (p.includes("offence") || p.includes("forward") || p.includes("attacker") || p === "fw" || p.includes("striker") || p.includes("winger") || p === "coach") return "Forward";
+  return "Forward";
+}
+
+function getDynamicTraits(position = "") {
+  const pos = position.toLowerCase();
+  if (pos.includes("goalkeeper") || pos.includes("gk")) return ["Reflexes", "Penalty Saver", "GK Command"];
+  if (pos.includes("defender") || pos.includes("df") || pos.includes("back")) return ["Tactical Tackler", "Aerial Threat", "Strength"];
+  if (pos.includes("midfielder") || pos.includes("mf")) return ["Playmaker", "Visionary Passer", "Midfield Controller"];
+  return ["Clinical Finisher", "Speed Dribbler", "Attacking Threat"];
+}
+
+function getDynamicAttributes(position = "") {
+  const pos = position.toLowerCase();
+  const isGK = pos.includes("goalkeeper") || pos.includes("gk");
+  const isDF = pos.includes("defender") || pos.includes("df") || pos.includes("back");
+  const isMF = pos.includes("midfielder") || pos.includes("mf");
+
+  if (isGK) {
+    return [
+      { label: "Reflexes", value: 80 + Math.round(Math.random() * 10) },
+      { label: "Diving", value: 78 + Math.round(Math.random() * 10) },
+      { label: "Handling", value: 75 + Math.round(Math.random() * 12) },
+      { label: "Kicking", value: 68 + Math.round(Math.random() * 18) },
+      { label: "Positioning", value: 78 + Math.round(Math.random() * 10) },
+      { label: "Physical", value: 65 + Math.round(Math.random() * 15) }
+    ];
+  }
+
+  let pace = 72 + Math.round(Math.random() * 18);
+  let shooting = 52 + Math.round(Math.random() * 28);
+  let passing = 68 + Math.round(Math.random() * 18);
+  let dribbling = 68 + Math.round(Math.random() * 22);
+  let defending = 42 + Math.round(Math.random() * 42);
+  let physical = 68 + Math.round(Math.random() * 18);
+
+  if (isDF) {
+    defending = 80 + Math.round(Math.random() * 10);
+    shooting = 38 + Math.round(Math.random() * 18);
+    physical = 76 + Math.round(Math.random() * 12);
+  } else if (isMF) {
+    passing = 80 + Math.round(Math.random() * 12);
+    dribbling = 76 + Math.round(Math.random() * 12);
+    shooting = 62 + Math.round(Math.random() * 18);
+    defending = 58 + Math.round(Math.random() * 18);
+  } else {
+    pace = 84 + Math.round(Math.random() * 11);
+    shooting = 82 + Math.round(Math.random() * 12);
+    dribbling = 82 + Math.round(Math.random() * 11);
+    defending = 28 + Math.round(Math.random() * 18);
+  }
+
+  return [
+    { label: "Pace", value: pace },
+    { label: "Shooting", value: shooting },
+    { label: "Passing", value: passing },
+    { label: "Dribbling", value: dribbling },
+    { label: "Defending", value: defending },
+    { label: "Physical", value: physical }
+  ];
+}
+
+function getDynamicHeatmap(position = "") {
+  const pos = position.toLowerCase();
+  const isGK = pos.includes("goalkeeper") || pos.includes("gk");
+  const isDF = pos.includes("defender") || pos.includes("df") || pos.includes("back");
+  const isMF = pos.includes("midfielder") || pos.includes("mf");
+
+  if (isGK) {
+    return [
+      { x: 10, y: 50, val: 95 },
+      { x: 12, y: 45, val: 80 },
+      { x: 12, y: 55, val: 80 },
+      { x: 8, y: 50, val: 90 }
+    ];
+  }
+  if (isDF) {
+    return [
+      { x: 25, y: 50, val: 90 },
+      { x: 28, y: 35, val: 75 },
+      { x: 28, y: 65, val: 75 },
+      { x: 20, y: 50, val: 85 },
+      { x: 35, y: 50, val: 60 }
+    ];
+  }
+  if (isMF) {
+    return [
+      { x: 50, y: 50, val: 95 },
+      { x: 45, y: 35, val: 80 },
+      { x: 45, y: 65, val: 80 },
+      { x: 55, y: 40, val: 85 },
+      { x: 55, y: 60, val: 85 },
+      { x: 35, y: 50, val: 65 }
+    ];
+  }
+  return [
+    { x: 78, y: 50, val: 95 },
+    { x: 82, y: 45, val: 88 },
+    { x: 82, y: 55, val: 88 },
+    { x: 72, y: 35, val: 70 },
+    { x: 72, y: 65, val: 70 },
+    { x: 88, y: 50, val: 85 }
+  ];
+}
+
+// Background crawler to fetch all team squads and populate players
+let crawlingSquads = false;
+
+const crawlAllSquads = async () => {
+  if (crawlingSquads) return;
+  crawlingSquads = true;
+  console.log("[Squad Crawler] Starting background squad crawl to populate player profiles...");
+
+  try {
+    // 1. Get all teams from database
+    const { data: dbTeams, error } = await supabase.from('teams').select('*');
+    if (error || !dbTeams) {
+      console.error("[Squad Crawler] Error reading teams:", error?.message);
+      crawlingSquads = false;
+      return;
+    }
+
+    console.log(`[Squad Crawler] Found ${dbTeams.length} teams to check.`);
+
+    for (let i = 0; i < dbTeams.length; i++) {
+      const team = dbTeams[i];
+      // Only process teams that have a numeric ID (original teams)
+      if (isNaN(Number(team.id))) continue;
+
+      // Check if we already have players with photos cached for this team in Supabase
+      const { data: teamPlayers, error: countError } = await supabase
+        .from('players')
+        .select('id, photo')
+        .ilike('team', team.name);
+
+      const hasPhotos = !countError && teamPlayers && teamPlayers.filter(p => p.photo && !p.photo.includes("placeholder") && p.photo !== "⚽").length > 3;
+
+      if (hasPhotos) {
+        // Already has players with photos for this team, skip
+        continue;
+      }
+
+      console.log(`[Squad Crawler] Fetching squad for team "${team.name}" (ID: ${team.id})...`);
+
+      try {
+        const response = await fetch(`${BASE_URL}/teams/${team.id}`, {
+          headers: { "X-Auth-Token": API_KEY }
+        });
+        
+        if (!response.ok) {
+          console.warn(`[Squad Crawler] Failed to fetch squad for "${team.name}" (ID: ${team.id}): ${response.status}`);
+          if (response.status === 429) {
+            await new Promise(r => setTimeout(r, 6000));
+            i--; // Retry this team
+          }
+          continue;
+        }
+
+        const data = await response.json();
+        const squad = data.squad || [];
+
+        if (squad.length > 0) {
+          const dbPlayers = [];
+          for (let k = 0; k < squad.length; k++) {
+            const p = squad[k];
+            const age = p.dateOfBirth ? new Date().getFullYear() - new Date(p.dateOfBirth).getFullYear() : 26;
+            const pos = normalizePosition(p.position);
+            const traits = getDynamicTraits(pos);
+            const attributes = getDynamicAttributes(pos);
+            const heatmap = getDynamicHeatmap(pos);
+
+            let photo = null;
+            let bio = null;
+            let height = null;
+            let weight = null;
+
+            // Fetch photo details for ALL players in each team squad
+            try {
+              const searchUrl = `https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p=${encodeURIComponent(p.name)}`;
+              const responseSearch = await fetch(searchUrl);
+              if (responseSearch.ok) {
+                const dbData = await responseSearch.json();
+                if (dbData.player && dbData.player.length > 0) {
+                  const firstPlayer = dbData.player[0];
+                  photo = firstPlayer.strCutout || firstPlayer.strThumb || null;
+                  
+                  if (firstPlayer.idPlayer) {
+                    const lookupUrl = `https://www.thesportsdb.com/api/v1/json/3/lookupplayer.php?id=${firstPlayer.idPlayer}`;
+                    const lookupResponse = await fetch(lookupUrl);
+                    if (lookupResponse.ok) {
+                      const lookupData = await lookupResponse.json();
+                      if (lookupData.players && lookupData.players.length > 0) {
+                        const fullPlayer = lookupData.players[0];
+                        photo = fullPlayer.strCutout || fullPlayer.strThumb || photo;
+                        bio = fullPlayer.strDescriptionEN || null;
+                        height = fullPlayer.strHeight || null;
+                        weight = fullPlayer.strWeight || null;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn(`[Squad Crawler] Failed to fetch details for player "${p.name}":`, err.message);
+            }
+            // Wait 350ms between player lookups to avoid rate limiting
+            await new Promise(r => setTimeout(r, 350));
+
+            dbPlayers.push({
+              id: String(p.id),
+              name: p.name,
+              team: team.name,
+              position: pos,
+              jersey: p.shirtNumber || null,
+              age: age,
+              club: data.name || null,
+              traits: traits,
+              stats: {
+                goals: Math.floor(Math.random() * 3),
+                assists: Math.floor(Math.random() * 2),
+                games: Math.floor(Math.random() * 4) + 1,
+                shotsPerGame: Number((1.2 + Math.random() * 2).toFixed(1)),
+                passAccuracy: 70 + Math.floor(Math.random() * 25),
+                rating: (6.5 + Math.random() * 1.8).toFixed(2)
+              },
+              attributes: attributes,
+              heatmap: heatmap,
+              photo,
+              bio,
+              height,
+              weight
+            });
+          }
+
+          const { error: upsertError } = await supabase.from('players').upsert(dbPlayers);
+          if (upsertError) {
+            console.error(`[Squad Crawler] Error saving players for "${team.name}":`, upsertError.message);
+          } else {
+            console.log(`[Squad Crawler] Saved ${squad.length} players for "${team.name}".`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Squad Crawler] Error processing team "${team.name}":`, err.message);
+      }
+
+      // Respect API rate limits (10 requests per minute = 1 request every 6 seconds)
+      await new Promise(r => setTimeout(r, 6500));
+    }
+    console.log("[Squad Crawler] Background squad crawl finished!");
+  } catch (err) {
+    console.error("[Squad Crawler] Fatal error during crawl:", err.message);
+  } finally {
+    crawlingSquads = false;
+  }
+};
+
 app.listen(PORT, () => {
   console.log(`PitchPulse Backend running on port ${PORT}`);
+  // Start background crawl to populate players after a short delay
+  setTimeout(crawlAllSquads, 5000);
 });
