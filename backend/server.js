@@ -479,10 +479,12 @@ const normalizeStandings = (apiStandings) => {
 
 // Cacheable matches retriever
 const getNormalizedMatches = async () => {
+  let normalizedList = [];
   try {
     const raw = await fetchFromFootballData("/competitions/WC/matches", "matches");
     if (raw && raw.matches) {
       const normalized = normalizeMatches(raw.matches);
+      normalizedList = normalized;
 
       // Collect all unique teams to prevent foreign key issues
       const uniqueTeams = new Map();
@@ -580,12 +582,54 @@ const getNormalizedMatches = async () => {
 
   if (error) {
     console.error("Error reading matches from Supabase:", error.message);
-    return [];
   }
 
   // Filter out any mock matches (football-data.org match IDs are purely numeric)
   const originalMatches = (dbMatches || []).filter(m => !isNaN(Number(m.id)));
-  return originalMatches;
+  if (originalMatches.length > 0) {
+    return originalMatches;
+  }
+
+  // If database matches are empty but we successfully fetched matches from the external API, serve them directly!
+  if (normalizedList.length > 0) {
+    console.log("[Matches Fallback] Serving freshly fetched external API matches directly since database write/cache was empty.");
+    return normalizedList;
+  }
+
+  // Ultimate fallback: return mockMatches mapped to UI expectations
+  console.log("[Matches Fallback] Serving mockMatches since no numeric API matches exist in the database.");
+  return mockMatches.map(m => {
+    const homeMeta = buildTeamMeta(m.homeTeam, m.homeId?.slice(0, 3).toUpperCase(), m.homeFlag, m.homeId);
+    const awayMeta = buildTeamMeta(m.awayTeam, m.awayId?.slice(0, 3).toUpperCase(), m.awayFlag, m.awayId);
+    return {
+      id: String(m.id),
+      status: m.status || "UPCOMING",
+      minute: m.status === "LIVE" ? 75 : null,
+      day: m.day || "Day 1",
+      date: m.date || (m.utcDate ? new Date(m.utcDate).toLocaleDateString() : "Jun 19"),
+      utcDate: m.utcDate || new Date().toISOString(),
+      source: "local-mock",
+      home: homeMeta,
+      away: awayMeta,
+      homeTeam: homeMeta.name,
+      awayTeam: awayMeta.name,
+      homeId: homeMeta.id,
+      awayId: awayMeta.id,
+      homeScore: m.homeScore ?? 0,
+      awayScore: m.awayScore ?? 0,
+      homeFlag: homeMeta.flag,
+      awayFlag: awayMeta.flag,
+      stats: m.stats || {
+        possession: { home: 50, away: 50 },
+        shots: { home: 10, away: 10 },
+        xg: { home: 1.0, away: 1.0 },
+        passAccuracy: { home: 80, away: 80 }
+      },
+      timeline: m.timeline || [],
+      predictProb: m.predictProb || { home: 45, draw: 25, away: 30 },
+      lineups: m.lineups || { home: [], away: [] }
+    };
+  });
 };
 
 // Logger middleware
@@ -671,13 +715,18 @@ app.get("/api/standings", async (req, res) => {
 
   if (error) {
     console.error("Error reading teams from Supabase for standings:", error.message);
-    return res.status(500).json({ error: error.message });
   }
 
   // Filter teams. If we have real tournament teams (numeric IDs), show them.
   // Otherwise fall back to mock teams.
-  const realTeams = dbTeams.filter(team => !isNaN(Number(team.id)));
-  const teamsToShow = realTeams.length > 0 ? realTeams : dbTeams;
+  const queriedTeams = (!error && dbTeams) ? dbTeams : [];
+  const realTeams = queriedTeams.filter(team => !isNaN(Number(team.id)));
+  let teamsToShow = realTeams.length > 0 ? realTeams : queriedTeams;
+
+  if (teamsToShow.length === 0) {
+    console.log("[Standings Fallback] Serving mockTeams since database contains no teams.");
+    teamsToShow = mockTeams;
+  }
 
   const standings = {};
   teamsToShow.forEach(team => {
@@ -990,34 +1039,57 @@ app.get("/api/players/details", async (req, res) => {
 
 // Teams List
 app.get("/api/teams", async (req, res) => {
-  const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
-  if (error) return res.status(500).json({ error: error.message });
-  
-  const enriched = data.map(team => {
-    const meta = getTeamFlagAndCrest(team);
-    return {
-      ...team,
-      group: team.group ? team.group.replace("Group ", "").replace("GROUP_", "").trim() : "A",
-      flag: meta.flag,
-      crest: meta.crest
-    };
-  });
-  res.json(enriched);
+  try {
+    const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
+    
+    // If database query failed or returned no teams, fall back to mockTeams
+    const teamsList = (!error && data && data.length > 0) ? data : mockTeams;
+    
+    const enriched = teamsList.map(team => {
+      const meta = getTeamFlagAndCrest(team);
+      return {
+        ...team,
+        group: team.group ? team.group.replace("Group ", "").replace("GROUP_", "").trim() : "A",
+        flag: meta.flag,
+        crest: meta.crest
+      };
+    });
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Players List
 app.get("/api/players", async (req, res) => {
-  const { data, error } = await supabase.from('players').select('*').order('name', { ascending: true });
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { data, error } = await supabase.from('players').select('*').order('name', { ascending: true });
+    
+    // Fall back to mockPlayers if empty or query failed
+    const playersList = (!error && data && data.length > 0) ? data : mockPlayers;
+    res.json(playersList);
+  } catch (err) {
+    res.json(mockPlayers);
+  }
 });
 
 // Player by ID
 app.get("/api/players/:id", async (req, res) => {
-  const { data, error } = await supabase.from('players').select('*').eq('id', req.params.id).maybeSingle();
-  if (error) return res.status(500).json({ error: error.message });
-  if (!data) return res.status(404).json({ error: "Player not found" });
-  res.json(data);
+  try {
+    const { data, error } = await supabase.from('players').select('*').eq('id', req.params.id).maybeSingle();
+    
+    // If not found in database or query failed, search in mockPlayers
+    if (error || !data) {
+      const fallbackPlayer = mockPlayers.find(p => String(p.id) === String(req.params.id));
+      if (fallbackPlayer) return res.json(fallbackPlayer);
+      return res.status(404).json({ error: "Player not found" });
+    }
+    res.json(data);
+  } catch (err) {
+    const fallbackPlayer = mockPlayers.find(p => String(p.id) === String(req.params.id));
+    if (fallbackPlayer) return res.json(fallbackPlayer);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Filter matches by team

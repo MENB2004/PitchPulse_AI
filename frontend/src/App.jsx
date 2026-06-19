@@ -35,7 +35,32 @@ import { supabase } from "./supabase.js";
 
 const AI_SERVICE_URL = import.meta.env.VITE_AI_SERVICE_URL || "http://localhost:8000";
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
+const countryCodes = {
+  mexico: "mx", "south korea": "kr", czechia: "cz", "south africa": "za",
+  switzerland: "ch", canada: "ca", qatar: "qa", "bosnia-herzegovina": "ba",
+  scotland: "gb-sct", morocco: "ma", brazil: "br", haiti: "ht",
+  "united states": "us", usa: "us", australia: "au", turkey: "tr", paraguay: "py",
+  germany: "de", ecuador: "ec", "ivory coast": "ci", curacao: "cw",
+  japan: "jp", netherlands: "nl", sweden: "se", tunisia: "tn",
+  egypt: "eg", belgium: "be", iran: "ir", "new zealand": "nz",
+  "cape verde islands": "cv", "saudi arabia": "sa", spain: "es", uruguay: "uy",
+  france: "fr", iraq: "iq", norway: "no", senegal: "sn",
+  algeria: "dz", argentina: "ar", jordan: "jo", austria: "at",
+  "congo dr": "cd", colombia: "co", portugal: "pt", uzbekistan: "uz",
+  england: "gb-eng", ghana: "gh", croatia: "hr", panama: "pa"
+};
 
+const getTeamFlag = (teamName) => {
+  const key = teamName?.toLowerCase().trim().replace(/[-_]+/g, " ") || "";
+  const code = countryCodes[key];
+  if (code) {
+    if (code.includes("-")) {
+      return `https://flagcdn.com/w160/${code.split("-")[1]}.png`;
+    }
+    return `https://flagcdn.com/w160/${code}.png`;
+  }
+  return "⚽";
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -593,71 +618,120 @@ function App() {
 
   const fetchAllMatches = async () => {
     try {
-      const res = await fetch(`${API_BASE}/matches`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      setMatches(normalizeMatchesForUi(data));
+      const { data, error } = await supabase
+        .from("matches")
+        .select("*")
+        .order("utcDate", { ascending: true });
+      if (error) throw error;
+      const originalMatches = (data || []).filter(m => !isNaN(Number(m.id)));
+      setMatches(normalizeMatchesForUi(originalMatches));
     } catch (err) {
-      console.error("Error fetching all matches:", err);
+      console.error("Error fetching all matches from Supabase:", err);
     }
   };
 
   const fetchLiveMatches = async () => {
     try {
-      const res = await fetch(`${API_BASE}/matches/live`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      setLiveMatches(normalizeMatchesForUi(data));
+      const { data, error } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("status", "LIVE")
+        .order("utcDate", { ascending: true });
+      if (error) throw error;
+      const originalLive = (data || []).filter(m => !isNaN(Number(m.id)));
+      setLiveMatches(normalizeMatchesForUi(originalLive));
     } catch (err) {
-      console.error("Error fetching live matches:", err);
+      console.error("Error fetching live matches from Supabase:", err);
     }
   };
 
   const fetchUpcomingMatches = async () => {
     try {
-      const res = await fetch(`${API_BASE}/matches/upcoming`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      setUpcomingMatches(normalizeMatchesForUi(data));
+      const { data, error } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("status", "UPCOMING")
+        .order("utcDate", { ascending: true });
+      if (error) throw error;
+      const originalUpcoming = (data || []).filter(m => !isNaN(Number(m.id)));
+      setUpcomingMatches(normalizeMatchesForUi(originalUpcoming));
     } catch (err) {
-      console.error("Error fetching upcoming matches:", err);
+      console.error("Error fetching upcoming matches from Supabase:", err);
     }
   };
 
   const fetchStandings = async () => {
     try {
-      const res = await fetch(`${API_BASE}/standings`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const standingsGrouped = await res.json();
-      setStandings(standingsGrouped);
+      const { data, error } = await supabase
+        .from("teams")
+        .select("*");
+      if (error) throw error;
+
+      const grouped = {};
+      const originalTeams = (data || []).filter(t => !isNaN(Number(t.id)));
+      originalTeams.forEach(team => {
+        if (!team.group) return;
+        const cleanGroup = team.group.replace("Group ", "").replace("GROUP_", "").trim();
+        const flag = getTeamFlag(team.name);
+        const teamWithFlag = {
+          ...team,
+          group: cleanGroup,
+          flag: flag,
+          crest: flag
+        };
+        if (!grouped[cleanGroup]) grouped[cleanGroup] = [];
+        grouped[cleanGroup].push(teamWithFlag);
+      });
+
+      Object.keys(grouped).forEach(group => {
+        grouped[group].sort((a, b) => b.pts - a.pts);
+      });
+
+      setStandings(grouped);
     } catch (err) {
-      console.error("Error fetching standings:", err);
+      console.error("Error fetching standings from Supabase:", err);
     }
   };
 
   const fetchTeams = async () => {
     try {
-      const res = await fetch(`${API_BASE}/teams`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      setTeams(data);
+      const { data, error } = await supabase
+        .from("teams")
+        .select("*")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      
+      const originalTeams = (data || []).filter(t => !isNaN(Number(t.id)));
+      const enriched = originalTeams.map(team => {
+        const flag = getTeamFlag(team.name);
+        return {
+          ...team,
+          group: team.group ? team.group.replace("Group ", "").replace("GROUP_", "").trim() : "A",
+          flag: flag,
+          crest: flag
+        };
+      });
+      setTeams(enriched);
     } catch (err) {
-      console.error("Error fetching teams:", err);
+      console.error("Error fetching teams from Supabase:", err);
     }
   };
 
   const fetchPlayers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/players`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      setPlayers(data);
-      if (data.length > 0) {
-        setSelectedPlayer(data[0]);
-        setComparePlayerId(data[1]?.id || "");
+      const { data, error } = await supabase
+        .from("players")
+        .select("*")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      const originalPlayers = (data || []).filter(p => !isNaN(Number(p.id)));
+      setPlayers(originalPlayers);
+      if (originalPlayers.length > 0) {
+        setSelectedPlayer(originalPlayers[0]);
+        setComparePlayerId(originalPlayers[1]?.id || "");
       }
     } catch (err) {
-      console.error("Error fetching players:", err);
+      console.error("Error fetching players from Supabase:", err);
     }
   };
 
@@ -678,19 +752,37 @@ function App() {
   const fetchSquad = async (teamId) => {
     setSquadLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/teams/${teamId}/squad`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      const mappedSquad = data.map(p => ({
+      const team = teams.find(t => t.id === teamId);
+      if (!team) throw new Error("Team not found");
+
+      const { data, error } = await supabase
+        .from("players")
+        .select("*")
+        .eq("team", team.name)
+        .order("name", { ascending: true });
+      if (error) throw error;
+
+      const originalSquad = (data || []).filter(p => !isNaN(Number(p.id)));
+      const mappedSquad = originalSquad.map(p => ({
         id: p.id,
         name: p.name,
         position: p.position,
-        dateOfBirth: p.dateOfBirth || (p.age ? `${new Date().getFullYear() - p.age}-01-01` : "1995-01-01"),
-        nationality: p.nationality || p.team
+        jersey: p.jersey,
+        age: p.age,
+        club: p.club,
+        traits: p.traits,
+        stats: p.stats,
+        attributes: p.attributes,
+        heatmap: p.heatmap,
+        photo: p.photo,
+        bio: p.bio,
+        height: p.height,
+        weight: p.weight,
+        nationality: p.team
       }));
       setActiveSquad(mappedSquad);
     } catch (err) {
-      console.error("Error fetching squad:", err);
+      console.error("Error fetching squad from Supabase:", err);
       setActiveSquad([]);
     } finally {
       setSquadLoading(false);
@@ -699,23 +791,19 @@ function App() {
 
   const enrichSelectedPlayer = async (player) => {
     try {
-      const res = await fetch(`${API_BASE}/players/details?name=${encodeURIComponent(player.name)}`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
+      const { data, error } = await supabase
+        .from("players")
+        .select("*")
+        .eq("id", player.id)
+        .maybeSingle();
+
+      if (error) throw error;
       if (data) {
-        const enriched = {
-          ...player,
-          photo: data.photo,
-          bio: data.bio,
-          height: data.height,
-          weight: data.weight,
-          stats: data.stats
-        };
-        setSelectedPlayer(enriched);
-        setPlayers(prev => prev.map(p => p.id === player.id ? enriched : p));
+        setSelectedPlayer(data);
+        setPlayers(prev => prev.map(p => p.id === player.id ? data : p));
       }
     } catch (err) {
-      console.warn("Failed to enrich selected player:", err.message);
+      console.warn("Failed to enrich selected player from Supabase:", err.message);
     }
   };
 
@@ -731,12 +819,12 @@ function App() {
       team: teamName,
       position: squadPlayer.position,
       jersey: squadPlayer.jersey || 11,
-      age: squadPlayer.age || (squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26),
+      age: squadPlayer.age || 26,
       club: squadPlayer.club || "TBD",
-      traits: getDynamicTraits(squadPlayer.position),
+      traits: squadPlayer.traits || getDynamicTraits(squadPlayer.position),
       stats: squadPlayer.stats || { goals: 0, assists: 0, games: 0, shotsPerGame: 0, passAccuracy: 80 },
-      attributes: getDynamicAttributes(squadPlayer.position),
-      heatmap: getDynamicHeatmap(squadPlayer.position),
+      attributes: squadPlayer.attributes || getDynamicAttributes(squadPlayer.position),
+      heatmap: squadPlayer.heatmap || getDynamicHeatmap(squadPlayer.position),
       photo: squadPlayer.photo || null,
       bio: squadPlayer.bio || null,
       height: squadPlayer.height || null,
@@ -745,55 +833,52 @@ function App() {
     setSelectedPlayer(initialPlayer);
     
     setPlayers(prev => {
-      if (!prev.some(p => p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase())) {
+      if (!prev.some(p => p.id === squadPlayer.id)) {
         return [initialPlayer, ...prev];
       }
-      return prev.map(p => (p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase()) ? initialPlayer : p);
+      return prev.map(p => p.id === squadPlayer.id ? initialPlayer : p);
     });
 
     try {
-      const res = await fetch(`${API_BASE}/players/details?name=${encodeURIComponent(squadPlayer.name)}`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
+      const { data, error } = await supabase
+        .from("players")
+        .select("*")
+        .eq("id", squadPlayer.id)
+        .maybeSingle();
+
+      if (error) throw error;
       if (data) {
-        const fullyEnriched = {
-          id: squadPlayer.id,
-          name: squadPlayer.name,
-          team: teamName,
-          position: squadPlayer.position,
-          jersey: data.jersey || 11,
-          age: data.age || (squadPlayer.dateOfBirth ? new Date().getFullYear() - new Date(squadPlayer.dateOfBirth).getFullYear() : 26),
-          club: data.club || "TBD",
-          traits: data.traits || getDynamicTraits(squadPlayer.position),
-          stats: data.stats || { goals: 0, assists: 0, games: 0, shotsPerGame: 0, passAccuracy: 80 },
-          attributes: data.attributes || getDynamicAttributes(squadPlayer.position),
-          heatmap: data.heatmap || getDynamicHeatmap(squadPlayer.position),
-          photo: data.photo || null,
-          bio: data.bio || null,
-          height: data.height || null,
-          weight: data.weight || null
-        };
-        setSelectedPlayer(fullyEnriched);
-        setPlayers(prev => prev.map(p => (p.id === squadPlayer.id || p.name.toLowerCase() === squadPlayer.name.toLowerCase()) ? fullyEnriched : p));
+        setSelectedPlayer(data);
+        setPlayers(prev => prev.map(p => p.id === squadPlayer.id ? data : p));
       }
     } catch (err) {
-      console.error("Error loading squad player details:", err);
+      console.error("Error loading squad player details from Supabase:", err);
     } finally {
       setPlayerDetailsLoading(false);
     }
   };
 
   const handleOpenMatchCenter = async (matchId) => {
-    try {
-      const res = await fetch(`${API_BASE}/matches/${matchId}`);
-      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
-      const data = await res.json();
-      if (data) {
-        setSelectedMatch(normalizeMatchForUi(data));
-        setModalOpen(true);
+    const match = matches.find(m => String(m.id) === String(matchId));
+    if (match) {
+      setSelectedMatch(match);
+      setModalOpen(true);
+    } else {
+      try {
+        const { data, error } = await supabase
+          .from("matches")
+          .select("*")
+          .eq("id", matchId)
+          .maybeSingle();
+        if (error) throw error;
+        if (data) {
+          const norm = normalizeMatchForUi(data);
+          setSelectedMatch(norm);
+          setModalOpen(true);
+        }
+      } catch (err) {
+        console.error("Error loading match details from Supabase:", err);
       }
-    } catch (err) {
-      console.error("Error loading match details:", err);
     }
   };
 
@@ -816,22 +901,13 @@ function App() {
     };
 
     try {
-      const res = await fetch(`${API_BASE}/predict/match`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        setPredictionResult(await res.json());
-      } else {
-        console.warn("Express predict service returned non-200. Using local heuristics.");
-        const result = runLocalPrediction(predictTeamA, predictTeamB, payload);
-        setPredictionResult(result);
-      }
-    } catch (err) {
-      console.warn("Could not connect to prediction service. Using local heuristics fallback.", err.message);
+      // Simulate brief loading delay for premium feedback
+      await new Promise(resolve => setTimeout(resolve, 800));
       const result = runLocalPrediction(predictTeamA, predictTeamB, payload);
       setPredictionResult(result);
+    } catch (err) {
+      console.error("Error during prediction:", err);
+      setPredictionError("Failed to calculate prediction.");
     } finally {
       setPredictionLoading(false);
     }
