@@ -15,7 +15,9 @@ import {
   Search,
   Filter,
   CheckCircle,
-  RotateCcw
+  RotateCcw,
+  SlidersHorizontal,
+  BarChart3
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -27,7 +29,12 @@ import {
   PieChart,
   Pie,
   Cell,
-  Tooltip
+  Tooltip,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid
 } from "recharts";
 import heroPoster from "./assets/hero.png";
 import fifaLogo from "./assets/fifa-transparent.png";
@@ -106,6 +113,15 @@ function App() {
   const [activeSquad, setActiveSquad] = useState([]);
   const [squadLoading, setSquadLoading] = useState(false);
   const [playerDetailsLoading, setPlayerDetailsLoading] = useState(false);
+
+  // Advanced Filters states
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterPace, setFilterPace] = useState(0);
+  const [filterShooting, setFilterShooting] = useState(0);
+  const [filterPassing, setFilterPassing] = useState(0);
+  const [filterDribbling, setFilterDribbling] = useState(0);
+  const [filterDefending, setFilterDefending] = useState(0);
+  const [filterPhysical, setFilterPhysical] = useState(0);
 
   // Heuristics for position-based attributes
   const getDynamicAttributes = (position) => {
@@ -481,10 +497,10 @@ function App() {
       name: teamB, fifaRanking: 30, attackPower: 75, defenseRating: 75, form: ["D"], h2h: {}
     };
 
-    let attackA = tA.attackPower || 75;
-    let defenseA = tA.defenseRating || 75;
-    let attackB = tB.attackPower || 75;
-    let defenseB = tB.defenseRating || 75;
+    let attackA = options.customA?.attackPower ?? (tA.attackPower || 75);
+    let defenseA = options.customA?.defenseRating ?? (tA.defenseRating || 75);
+    let attackB = options.customB?.attackPower ?? (tB.attackPower || 75);
+    let defenseB = options.customB?.defenseRating ?? (tB.defenseRating || 75);
 
     if (mentalityA === "attacking") { attackA *= 1.15; defenseA *= 0.88; }
     else if (mentalityA === "defensive") { defenseA *= 1.15; attackA *= 0.88; }
@@ -897,7 +913,9 @@ function App() {
       formationA,
       mentalityA,
       formationB,
-      mentalityB
+      mentalityB,
+      customA: useVisualLineup ? calculateVisualTeamRatings("A") : null,
+      customB: useVisualLineup ? calculateVisualTeamRatings("B") : null
     };
 
     try {
@@ -980,13 +998,217 @@ function App() {
     return matchDay && matchStatus && matchTeam && matchSearch;
   });
 
+  // Get individual attribute value helper
+  const getPlayerAttributeValue = (player, label) => {
+    if (!player || !Array.isArray(player.attributes)) return 0;
+    const attr = player.attributes.find(a => a.label?.toLowerCase() === label.toLowerCase());
+    return attr ? attr.value : 0;
+  };
+
+  // Matches attribute slider including goalkeeper mappings
+  const matchesAttributeSlider = (player, label, minVal) => {
+    if (minVal === 0) return true;
+    if (!player) return false;
+    const isGK = player.position?.toLowerCase().includes("goalkeeper") || player.position?.toLowerCase() === "gk";
+    let targetLabel = label;
+    if (isGK) {
+      if (label === "Pace") targetLabel = "Diving";
+      else if (label === "Shooting") targetLabel = "Kicking";
+      else if (label === "Passing") targetLabel = "Handling";
+      else if (label === "Dribbling") targetLabel = "Reflexes";
+      else if (label === "Defending") targetLabel = "Positioning";
+    }
+    const val = getPlayerAttributeValue(player, targetLabel);
+    return val >= minVal;
+  };
+
   // Player search logic
   const filteredPlayers = players.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                         p.team.toLowerCase().includes(searchQuery.toLowerCase());
     const matchPosition = playerFilterPosition === "All" || p.position === playerFilterPosition;
-    return matchSearch && matchPosition;
+
+    const matchPace = matchesAttributeSlider(p, "Pace", filterPace);
+    const matchShooting = matchesAttributeSlider(p, "Shooting", filterShooting);
+    const matchPassing = matchesAttributeSlider(p, "Passing", filterPassing);
+    const matchDribbling = matchesAttributeSlider(p, "Dribbling", filterDribbling);
+    const matchDefending = matchesAttributeSlider(p, "Defending", filterDefending);
+    const matchPhysical = matchesAttributeSlider(p, "Physical", filterPhysical);
+
+    return matchSearch && matchPosition && matchPace && matchShooting && matchPassing && matchDribbling && matchDefending && matchPhysical;
   });
+
+  // Get dynamic average rating for a player
+  const getPlayerRating = (player) => {
+    if (!player) return 0;
+    if (player.rating) return player.rating;
+    if (player.stats && player.stats.rating) return player.stats.rating;
+    if (Array.isArray(player.attributes) && player.attributes.length > 0) {
+      const sum = player.attributes.reduce((acc, a) => acc + (a.value || 0), 0);
+      return Math.round(sum / player.attributes.length);
+    }
+    return 70; // Fallback
+  };
+
+  // Get aggregated top 10 team power ratings
+  const getTeamPowerRatings = () => {
+    const teamStats = {};
+    players.forEach(p => {
+      if (!p.team) return;
+      if (!teamStats[p.team]) {
+        teamStats[p.team] = { sum: 0, count: 0 };
+      }
+      teamStats[p.team].sum += getPlayerRating(p);
+      teamStats[p.team].count += 1;
+    });
+
+    const data = Object.keys(teamStats).map(teamName => {
+      const avg = Math.round(teamStats[teamName].sum / teamStats[teamName].count);
+      return {
+        name: teamName,
+        rating: avg
+      };
+    });
+
+    // Sort by rating descending and take top 10
+    return data.sort((a, b) => b.rating - a.rating).slice(0, 10);
+  };
+
+  // Visual Lineup builder states
+  const [useVisualLineup, setUseVisualLineup] = useState(false);
+  const [configActiveTeam, setConfigActiveTeam] = useState("A"); // "A" or "B"
+  const [visualLineupA, setVisualLineupA] = useState({});
+  const [visualLineupB, setVisualLineupB] = useState({});
+  const [selectedNodeIndex, setSelectedNodeIndex] = useState(null);
+
+  // Position coordinates matching visual pitch layouts
+  const getFormationCoords = (formation) => {
+    const f = formation || "4-3-3";
+    if (f === "4-4-2") {
+      return [
+        { x: 10, y: 50, role: "GK" },
+        { x: 28, y: 15, role: "LB" },
+        { x: 25, y: 38, role: "CB" },
+        { x: 25, y: 62, role: "CB" },
+        { x: 28, y: 85, role: "RB" },
+        { x: 50, y: 15, role: "LM" },
+        { x: 48, y: 38, role: "CM" },
+        { x: 48, y: 62, role: "CM" },
+        { x: 50, y: 85, role: "RM" },
+        { x: 80, y: 35, role: "ST" },
+        { x: 80, y: 65, role: "ST" }
+      ];
+    }
+    if (f === "3-5-2") {
+      return [
+        { x: 10, y: 50, role: "GK" },
+        { x: 25, y: 25, role: "CB" },
+        { x: 22, y: 50, role: "CB" },
+        { x: 25, y: 75, role: "CB" },
+        { x: 45, y: 12, role: "LWB" },
+        { x: 45, y: 88, role: "RWB" },
+        { x: 50, y: 35, role: "CM" },
+        { x: 46, y: 50, role: "CM" },
+        { x: 50, y: 65, role: "CM" },
+        { x: 80, y: 35, role: "ST" },
+        { x: 80, y: 65, role: "ST" }
+      ];
+    }
+    if (f === "5-4-1") {
+      return [
+        { x: 10, y: 50, role: "GK" },
+        { x: 30, y: 12, role: "LWB" },
+        { x: 25, y: 30, role: "CB" },
+        { x: 22, y: 50, role: "CB" },
+        { x: 25, y: 70, role: "CB" },
+        { x: 30, y: 88, role: "RWB" },
+        { x: 52, y: 20, role: "LM" },
+        { x: 48, y: 40, role: "CM" },
+        { x: 48, y: 60, role: "CM" },
+        { x: 52, y: 80, role: "RM" },
+        { x: 82, y: 50, role: "ST" }
+      ];
+    }
+    // Default 4-3-3
+    return [
+      { x: 10, y: 50, role: "GK" },
+      { x: 28, y: 15, role: "LB" },
+      { x: 25, y: 38, role: "CB" },
+      { x: 25, y: 62, role: "CB" },
+      { x: 28, y: 85, role: "RB" },
+      { x: 50, y: 25, role: "CM" },
+      { x: 45, y: 50, role: "CM" },
+      { x: 50, y: 75, role: "CM" },
+      { x: 78, y: 20, role: "LW" },
+      { x: 84, y: 50, role: "ST" },
+      { x: 78, y: 80, role: "RW" }
+    ];
+  };
+
+  // Dynamically calculate average custom team ratings based on visual pitch squad builder
+  const calculateVisualTeamRatings = (teamType) => {
+    const lineup = teamType === "A" ? visualLineupA : visualLineupB;
+    const baseTeamName = teamType === "A" ? predictTeamA : predictTeamB;
+    
+    const dbTeam = teams.find(t => t.name.toLowerCase() === baseTeamName.toLowerCase()) || {
+      attackPower: 75,
+      defenseRating: 75
+    };
+
+    const assignedPlayers = Object.values(lineup).filter(Boolean);
+    if (assignedPlayers.length === 0) {
+      return {
+        attackPower: dbTeam.attackPower || 75,
+        defenseRating: dbTeam.defenseRating || 75,
+        avgRating: 75
+      };
+    }
+
+    let totalRating = 0;
+    let totalAttack = 0;
+    let totalDefense = 0;
+    let attackCount = 0;
+    let defenseCount = 0;
+
+    assignedPlayers.forEach(p => {
+      const rating = getPlayerRating(p);
+      totalRating += rating;
+      
+      const pos = p.position?.toLowerCase() || "";
+      const pace = getPlayerAttributeValue(p, "Pace");
+      const shooting = getPlayerAttributeValue(p, "Shooting");
+      const passing = getPlayerAttributeValue(p, "Passing");
+      const dribbling = getPlayerAttributeValue(p, "Dribbling");
+      const defending = getPlayerAttributeValue(p, "Defending");
+      const physical = getPlayerAttributeValue(p, "Physical");
+
+      if (pos.includes("forward") || pos.includes("striker") || pos.includes("winger") || pos.includes("att")) {
+        totalAttack += (shooting * 0.4 + pace * 0.3 + dribbling * 0.2 + passing * 0.1);
+        attackCount++;
+      } else if (pos.includes("defender") || pos.includes("back") || pos.includes("gk") || pos.includes("goalkeeper")) {
+        totalDefense += (defending * 0.5 + physical * 0.3 + pace * 0.2);
+        defenseCount++;
+      } else { // Midfielder
+        totalAttack += (passing * 0.3 + dribbling * 0.3 + shooting * 0.2 + pace * 0.2);
+        totalDefense += (defending * 0.4 + physical * 0.4 + passing * 0.2);
+        attackCount++;
+        defenseCount++;
+      }
+    });
+
+    const avgRating = Math.round(totalRating / assignedPlayers.length);
+    const calculatedAttack = attackCount > 0 ? Math.round(totalAttack / attackCount) : avgRating;
+    const calculatedDefense = defenseCount > 0 ? Math.round(totalDefense / defenseCount) : avgRating;
+
+    return {
+      attackPower: calculatedAttack,
+      defenseRating: calculatedDefense,
+      avgRating
+    };
+  };
+
+  const teamAPlayers = players.filter(p => p.team?.toLowerCase() === predictTeamA?.toLowerCase());
+  const teamBPlayers = players.filter(p => p.team?.toLowerCase() === predictTeamB?.toLowerCase());
 
   // Comparative Radar Data
   const comparePlayer = players.find(p => p.id === comparePlayerId);
@@ -1000,12 +1222,41 @@ function App() {
   const positionOptions = ["All", ...Array.from(new Set(players.map(p => p.position).filter(Boolean)))].sort((a, b) => {
     return (positionOrder[a] ?? 99) - (positionOrder[b] ?? 99);
   });
-  const radarData = selectedPlayer && comparePlayer ? selectedPlayer.attributes.map((attr, index) => ({
-    subject: attr.label,
-    [selectedPlayer.name]: attr.value,
-    [comparePlayer.name]: comparePlayer.attributes[index].value,
-    fullMark: 100
-  })) : [];
+  const compareAttributeMapping = {
+    "pace": "diving",
+    "shooting": "kicking",
+    "passing": "handling",
+    "dribbling": "reflexes",
+    "defending": "positioning",
+    "physical": "physical",
+    "diving": "pace",
+    "kicking": "shooting",
+    "handling": "passing",
+    "reflexes": "dribbling",
+    "positioning": "defending"
+  };
+
+  const getComparisonAttributeValue = (playerA, playerB, attrA) => {
+    const labelA = attrA.label;
+    if (!playerB) return 0;
+    let valB = getPlayerAttributeValue(playerB, labelA);
+    if (valB > 0) return valB;
+    const mappedLabel = compareAttributeMapping[labelA.toLowerCase()];
+    if (mappedLabel) {
+      valB = getPlayerAttributeValue(playerB, mappedLabel);
+    }
+    return valB;
+  };
+
+  const radarData = selectedPlayer && comparePlayer ? selectedPlayer.attributes.map((attr) => {
+    const valB = getComparisonAttributeValue(selectedPlayer, comparePlayer, attr);
+    return {
+      subject: attr.label,
+      A: attr.value,
+      B: valB,
+      fullMark: 100
+    };
+  }) : [];
 
   return (
     <div className="min-h-screen bg-[#07090e] text-[#e5e7eb] font-sans pb-16">
@@ -1050,6 +1301,12 @@ function App() {
             className={`nav-tab flex items-center gap-2 text-sm ${activeTab === "standings" ? "active" : ""}`}
           >
             <Award className="w-4 h-4" /> Standings & Teams
+          </button>
+          <button 
+            onClick={() => setActiveTab("analytics")} 
+            className={`nav-tab flex items-center gap-2 text-sm ${activeTab === "analytics" ? "active" : ""}`}
+          >
+            <BarChart3 className="w-4 h-4" /> Analytics & Stats
           </button>
         </nav>
       </header>
@@ -1638,6 +1895,252 @@ function App() {
 
               </div>
 
+              {/* Visual Squad Builder & Pitch option */}
+              <div className="flex justify-between items-center bg-white/5 border border-white/5 p-4 rounded-xl mb-6">
+                <div>
+                  <h3 className="text-sm font-bold text-white">Visual Lineup Builder</h3>
+                  <p className="text-[11px] text-white/40">Build starting lineups on a visual pitch to compute custom ratings.</p>
+                </div>
+                <button
+                  onClick={() => setUseVisualLineup(!useVisualLineup)}
+                  className={`px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider border transition-all ${
+                    useVisualLineup 
+                      ? "bg-emerald-500/15 text-[#00ff87] border-emerald-500/30"
+                      : "bg-white/5 text-white/50 border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  {useVisualLineup ? "Active: Visual Builder" : "Inactive: Using Team Base Ratings"}
+                </button>
+              </div>
+
+              {useVisualLineup && (
+                <div className="mb-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Configuration Tab for Team A / B */}
+                  <div className="lg:col-span-2 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex bg-[#07090e]/60 p-1 rounded-xl border border-white/5">
+                        <button
+                          onClick={() => setConfigActiveTeam("A")}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                            configActiveTeam === "A" ? "bg-emerald-500/10 text-[#00ff87] border border-emerald-500/20" : "text-white/40"
+                          }`}
+                        >
+                          Configure {predictTeamA} (Home)
+                        </button>
+                        <button
+                          onClick={() => setConfigActiveTeam("B")}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                            configActiveTeam === "B" ? "bg-emerald-500/10 text-[#00ff87] border border-emerald-500/20" : "text-white/40"
+                          }`}
+                        >
+                          Configure {predictTeamB} (Away)
+                        </button>
+                      </div>
+
+                      <span className="text-[10px] text-white/40 uppercase font-semibold">
+                        Formation: {configActiveTeam === "A" ? formationA : formationB}
+                      </span>
+                    </div>
+
+                    {/* Football Field Visual */}
+                    <div className="relative w-full h-[400px] bg-[#1a4a34] bg-gradient-to-b from-[#1a4a34] to-[#123625] border border-emerald-500/30 rounded-2xl overflow-hidden shadow-2xl">
+                      {/* Grass stripes */}
+                      <div className="absolute inset-0 flex flex-col justify-between opacity-5">
+                        {Array.from({ length: 6 }).map((_, idx) => (
+                          <div key={idx} className="h-12 border-b border-white" />
+                        ))}
+                      </div>
+
+                      {/* Pitch Field Markings */}
+                      <div className="absolute inset-4 border border-white/15 pointer-events-none" />
+                      <div className="absolute inset-y-4 left-4 right-1/2 border-r border-white/15 pointer-events-none" />
+                      {/* Center Circle */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 border border-white/15 rounded-full pointer-events-none" />
+                      {/* Center point */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-white/20 rounded-full pointer-events-none" />
+                      {/* Penalty box Left */}
+                      <div className="absolute top-1/4 bottom-1/4 left-4 w-20 border-r border-t border-b border-white/15 pointer-events-none" />
+                      {/* Penalty box Right */}
+                      <div className="absolute top-1/4 bottom-1/4 right-4 w-20 border-l border-t border-b border-white/15 pointer-events-none" />
+                      {/* Goal box Left */}
+                      <div className="absolute top-[37.5%] bottom-[37.5%] left-4 w-8 border-r border-t border-b border-white/15 pointer-events-none" />
+                      {/* Goal box Right */}
+                      <div className="absolute top-[37.5%] bottom-[37.5%] right-4 w-8 border-l border-t border-b border-white/15 pointer-events-none" />
+
+                      {/* Position Nodes */}
+                      {getFormationCoords(configActiveTeam === "A" ? formationA : formationB).map((node, idx) => {
+                        const lineup = configActiveTeam === "A" ? visualLineupA : visualLineupB;
+                        const player = lineup[idx];
+                        const isActive = selectedNodeIndex === idx;
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => setSelectedNodeIndex(idx)}
+                            style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                            className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group transition-all cursor-pointer"
+                          >
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 shadow-lg transition-all ${
+                              player 
+                                ? "bg-purple-500/80 border-[#00ff87] text-white" 
+                                : "bg-[#07090e]/80 border-white/25 text-white/50 hover:border-white/50"
+                            } ${isActive ? "ring-4 ring-emerald-500/50 scale-110" : ""}`}>
+                              {player ? (
+                                <span className="text-[10px] font-black">{player.jersey || "#"}</span>
+                              ) : (
+                                <span className="text-xs font-bold">+</span>
+                              )}
+                            </div>
+                            
+                            <span className="mt-1 px-1.5 py-0.5 rounded text-[8px] font-bold bg-[#07090e]/95 text-white border border-white/5 max-w-[80px] truncate shadow">
+                              {player ? player.name : node.role}
+                            </span>
+                            
+                            {player && (
+                              <span className="text-[7px] text-[#00ff87] font-bold bg-emerald-500/10 px-1 rounded mt-0.5">
+                                ★ {getPlayerRating(player)}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Node Config Panel / Roster Picker */}
+                  <div className="lg:col-span-1 space-y-4">
+                    <div className="glass-panel p-5 h-[400px] flex flex-col">
+                      {selectedNodeIndex === null ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center text-white/40 p-4">
+                          <Users className="w-8 h-8 mb-2 opacity-50" />
+                          <h4 className="font-bold text-xs uppercase text-white/60">No Node Selected</h4>
+                          <p className="text-[10px] mt-1">Click any position node on the pitch to assign a player from the squad.</p>
+                        </div>
+                      ) : (
+                        <div className="flex-1 flex flex-col h-full min-h-0">
+                          {/* Header info */}
+                          <div className="border-b border-white/5 pb-3 mb-3 flex items-center justify-between">
+                            <div>
+                              <h4 className="text-xs uppercase font-bold text-emerald-400">
+                                Position Slot #{selectedNodeIndex + 1}
+                              </h4>
+                              <p className="text-[10px] text-white/40 uppercase font-semibold">
+                                Required: {getFormationCoords(configActiveTeam === "A" ? formationA : formationB)[selectedNodeIndex]?.role}
+                              </p>
+                            </div>
+                            
+                            <button
+                              onClick={() => setSelectedNodeIndex(null)}
+                              className="text-white/40 hover:text-white transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Currently Assigned */}
+                          {(() => {
+                            const lineup = configActiveTeam === "A" ? visualLineupA : visualLineupB;
+                            const player = lineup[selectedNodeIndex];
+                            return player ? (
+                              <div className="bg-purple-500/10 border border-purple-500/20 p-2 rounded flex items-center justify-between mb-4">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-white truncate">{player.name}</div>
+                                  <div className="text-[9px] text-[#00ff87] font-bold">Rating: {getPlayerRating(player)}</div>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const setter = configActiveTeam === "A" ? setVisualLineupA : setVisualLineupB;
+                                    setter(prev => {
+                                      const next = { ...prev };
+                                      delete next[selectedNodeIndex];
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-[9px] font-bold text-red-400 hover:text-red-300 transition-colors uppercase"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="bg-white/5 border border-white/5 p-2 rounded text-[10px] text-white/40 mb-4 text-center">
+                                No player currently assigned.
+                              </div>
+                            );
+                          })()}
+
+                          {/* List of squad players */}
+                          <h5 className="text-[10px] uppercase font-bold text-white/40 mb-2">Available Squad Players</h5>
+                          <div className="flex-1 overflow-y-auto pr-1 space-y-2 min-h-0">
+                            {(configActiveTeam === "A" ? teamAPlayers : teamBPlayers).map(player => {
+                              const lineup = configActiveTeam === "A" ? visualLineupA : visualLineupB;
+                              const isAssignedElsewhere = Object.entries(lineup).some(([idx, p]) => p?.id === player.id && Number(idx) !== selectedNodeIndex);
+                              const isAssignedHere = lineup[selectedNodeIndex]?.id === player.id;
+
+                              return (
+                                <button
+                                  key={player.id}
+                                  disabled={isAssignedElsewhere}
+                                  onClick={() => {
+                                    const setter = configActiveTeam === "A" ? setVisualLineupA : setVisualLineupB;
+                                    setter(prev => ({
+                                      ...prev,
+                                      [selectedNodeIndex]: player
+                                    }));
+                                  }}
+                                  className={`w-full p-2.5 rounded border flex items-center justify-between gap-2 text-left transition-all ${
+                                    isAssignedHere
+                                      ? "bg-[#00ff87]/10 border-[#00ff87]/20 text-[#00ff87]"
+                                      : (isAssignedElsewhere 
+                                          ? "opacity-30 border-transparent bg-transparent" 
+                                          : "bg-white/5 border-transparent hover:bg-white/10 hover:border-white/5 text-white")
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-bold truncate">{player.name}</div>
+                                    <div className="text-[9px] opacity-60 uppercase font-semibold">{player.position} · #{player.jersey}</div>
+                                  </div>
+                                  <span className="text-xs font-bold font-mono">
+                                    {getPlayerRating(player)}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Display calculated metrics */}
+                  <div className="col-span-1 lg:col-span-3 bg-white/5 border border-white/5 p-4 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
+                    <div>
+                      <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">Configured Squad (A)</span>
+                      <h4 className="text-sm font-extrabold text-white mt-0.5">
+                        {Object.values(visualLineupA).filter(Boolean).length} / 11 Players
+                      </h4>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">Dynamic Strength (A)</span>
+                      <h4 className="text-sm font-extrabold text-cyan-400 mt-0.5">
+                        ATT: {calculateVisualTeamRatings("A").attackPower} · DEF: {calculateVisualTeamRatings("A").defenseRating}
+                      </h4>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">Configured Squad (B)</span>
+                      <h4 className="text-sm font-extrabold text-white mt-0.5">
+                        {Object.values(visualLineupB).filter(Boolean).length} / 11 Players
+                      </h4>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">Dynamic Strength (B)</span>
+                      <h4 className="text-sm font-extrabold text-pink-400 mt-0.5">
+                        ATT: {calculateVisualTeamRatings("B").attackPower} · DEF: {calculateVisualTeamRatings("B").defenseRating}
+                      </h4>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {predictionError && (
                 <div className="bg-red-500/10 border border-red-500/25 p-3 rounded-lg flex items-center gap-2 text-xs text-red-400 mb-6">
                   <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -1836,27 +2339,87 @@ function App() {
                   className="w-full bg-[#07090e] border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-purple-400"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-white/40" />
-                <select 
-                  value={playerFilterPosition}
-                  onChange={(e) => setPlayerFilterPosition(e.target.value)}
-                  className="bg-[#07090e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-white/40" />
+                  <select 
+                    value={playerFilterPosition}
+                    onChange={(e) => setPlayerFilterPosition(e.target.value)}
+                    className="bg-[#07090e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                  >
+                    {positionOptions.map(pos => {
+                      let label = pos;
+                      if (pos === "All") label = "All Positions";
+                      else if (pos.toLowerCase() === "goalkeeper") label = "Goalkeepers";
+                      else if (pos.toLowerCase() === "defender") label = "Defenders";
+                      else if (pos.toLowerCase() === "midfielder") label = "Midfielders";
+                      else if (pos.toLowerCase() === "forward") label = "Forwards & Attackers";
+                      return (
+                        <option key={pos} value={pos}>{label}</option>
+                      );
+                    })}
+                  </select>
+                </div>
+                
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all border ${
+                    showFilters 
+                      ? "bg-purple-500/10 border-purple-500/30 text-purple-400" 
+                      : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+                  }`}
                 >
-                  {positionOptions.map(pos => {
-                    let label = pos;
-                    if (pos === "All") label = "All Positions";
-                    else if (pos.toLowerCase() === "goalkeeper") label = "Goalkeepers";
-                    else if (pos.toLowerCase() === "defender") label = "Defenders";
-                    else if (pos.toLowerCase() === "midfielder") label = "Midfielders";
-                    else if (pos.toLowerCase() === "forward") label = "Forwards & Attackers";
-                    return (
-                      <option key={pos} value={pos}>{label}</option>
-                    );
-                  })}
-                </select>
+                  <SlidersHorizontal className="w-4 h-4" />
+                  Advanced Filters {(filterPace > 0 || filterShooting > 0 || filterPassing > 0 || filterDribbling > 0 || filterDefending > 0 || filterPhysical > 0) && "•"}
+                </button>
               </div>
             </div>
+
+            {/* Advanced Filters Drawer Panel */}
+            {showFilters && (
+              <div className="bg-white/5 p-5 rounded-xl border border-purple-500/20 shadow-inner grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                {[
+                  { label: "Pace / Diving", state: filterPace, setState: setFilterPace },
+                  { label: "Shooting / Kicking", state: filterShooting, setState: setFilterShooting },
+                  { label: "Passing / Handling", state: filterPassing, setState: setFilterPassing },
+                  { label: "Dribbling / Reflexes", state: filterDribbling, setState: setFilterDribbling },
+                  { label: "Defending / Positioning", state: filterDefending, setState: setFilterDefending },
+                  { label: "Physical", state: filterPhysical, setState: setFilterPhysical },
+                ].map(({ label, state, setState }) => (
+                  <div key={label} className="space-y-1.5">
+                    <div className="flex justify-between text-[11px] font-semibold text-white/60">
+                      <span>{label}</span>
+                      <span className="text-[#00ff87] font-mono">Min: {state}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      value={state}
+                      onChange={(e) => setState(Number(e.target.value))}
+                      className="w-full accent-purple-500 bg-white/10 h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                ))}
+                
+                <div className="col-span-2 md:col-span-3 lg:col-span-6 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setFilterPace(0);
+                      setFilterShooting(0);
+                      setFilterPassing(0);
+                      setFilterDribbling(0);
+                      setFilterDefending(0);
+                      setFilterPhysical(0);
+                    }}
+                    className="text-xs text-white/40 hover:text-purple-400 transition-colors flex items-center gap-1 font-semibold"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Reset Attributes
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
@@ -2079,8 +2642,8 @@ function App() {
                               <PolarGrid stroke="rgba(255,255,255,0.05)" />
                               <PolarAngleAxis dataKey="subject" stroke="rgba(255,255,255,0.6)" fontSize={9} />
                               <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="rgba(255,255,255,0.1)" />
-                              <Radar name={selectedPlayer.name} dataKey={selectedPlayer.name} stroke="#00f0ff" fill="#00f0ff" fillOpacity={0.25} />
-                              <Radar name={comparePlayer.name} dataKey={comparePlayer.name} stroke="#ff2a5f" fill="#ff2a5f" fillOpacity={0.25} />
+                              <Radar name={selectedPlayer.name} dataKey="A" stroke="#00f0ff" fill="#00f0ff" fillOpacity={0.25} />
+                              <Radar name={comparePlayer.name} dataKey="B" stroke="#ff2a5f" fill="#ff2a5f" fillOpacity={0.25} />
                             </RadarChart>
                           </ResponsiveContainer>
                         </div>
@@ -2098,17 +2661,87 @@ function App() {
                         </div>
                       )}
 
-                      {/* Display minor comparative stats table */}
-                      <div className="mt-3 bg-white/5 p-2.5 rounded-lg border border-white/5 text-[11px] space-y-1.5">
-                        <div className="flex justify-between">
-                          <span className="text-white/40">Goals Scored</span>
-                          <span className="font-bold text-[#00ff87]">{selectedPlayer.stats.goals} {comparePlayer && `vs ${comparePlayer.stats.goals}`}</span>
+                      {comparePlayer ? (
+                        <div className="mt-4 bg-[#07090e]/60 p-4 rounded-xl border border-white/5 space-y-3">
+                          <h5 className="text-[10px] font-bold text-white/40 uppercase tracking-widest border-b border-white/5 pb-2">Side-by-Side Comparison</h5>
+                          
+                          {/* Headers */}
+                          <div className="grid grid-cols-3 text-[10px] uppercase font-bold text-white/40 text-center">
+                            <div className="text-left truncate max-w-[80px] text-cyan-400">{selectedPlayer.name}</div>
+                            <div>Attribute</div>
+                            <div className="text-right truncate max-w-[80px] text-pink-400">{comparePlayer.name}</div>
+                          </div>
+
+                          {/* Core Attributes comparison */}
+                          <div className="space-y-1.5 pt-1">
+                            {selectedPlayer.attributes.map((attr) => {
+                              const labelA = attr.label;
+                              const valA = attr.value;
+                              const valB = getComparisonAttributeValue(selectedPlayer, comparePlayer, attr);
+                              const isAWinner = valA > valB;
+                              const isBWinner = valB > valA;
+                              
+                              return (
+                                <div key={labelA} className="grid grid-cols-3 text-xs py-1 border-b border-white/5">
+                                  {/* Player A score */}
+                                  <div className={`text-left font-mono font-bold ${isAWinner ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'text-white/60'}`}>
+                                    {valA} {isAWinner && "★"}
+                                  </div>
+                                  {/* Attribute Label */}
+                                  <div className="text-center text-[10px] text-white/40 uppercase font-semibold">
+                                    {labelA}
+                                  </div>
+                                  {/* Player B score */}
+                                  <div className={`text-right font-mono font-bold ${isBWinner ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'text-white/60'}`}>
+                                    {isBWinner && "★"} {valB}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Custom stats comparison */}
+                          <div className="space-y-1.5 pt-2 border-t border-white/5">
+                            {[
+                              { label: "Goals", key: "goals", format: (v) => v },
+                              { label: "Assists", key: "assists", format: (v) => v },
+                              { label: "Games Played", key: "games", format: (v) => v },
+                              { label: "Pass Accuracy", key: "passAccuracy", format: (v) => `${v}%` },
+                              { label: "Shots / Game", key: "shotsPerGame", format: (v) => v },
+                            ].map((stat) => {
+                              const valA = selectedPlayer.stats?.[stat.key] ?? 0;
+                              const valB = comparePlayer.stats?.[stat.key] ?? 0;
+                              const isAWinner = valA > valB;
+                              const isBWinner = valB > valA;
+
+                              return (
+                                <div key={stat.label} className="grid grid-cols-3 text-xs py-1 border-b border-white/5">
+                                  <div className={`text-left font-mono font-bold ${isAWinner ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'text-white/60'}`}>
+                                    {stat.format(valA)} {isAWinner && "★"}
+                                  </div>
+                                  <div className="text-center text-[10px] text-white/40 uppercase font-semibold">
+                                    {stat.label}
+                                  </div>
+                                  <div className={`text-right font-mono font-bold ${isBWinner ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'text-white/60'}`}>
+                                    {isBWinner && "★"} {stat.format(valB)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-white/40">Pass Accuracy</span>
-                          <span className="font-bold">{selectedPlayer.stats.passAccuracy}% {comparePlayer && `vs ${comparePlayer.stats.passAccuracy}%`}</span>
+                      ) : (
+                        <div className="mt-3 bg-white/5 p-2.5 rounded-lg border border-white/5 text-[11px] space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="text-white/40">Goals Scored</span>
+                            <span className="font-bold text-[#00ff87]">{selectedPlayer.stats.goals}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-white/40">Pass Accuracy</span>
+                            <span className="font-bold">{selectedPlayer.stats.passAccuracy}%</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                     </div>
 
@@ -2118,6 +2751,144 @@ function App() {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* TABS 5: ANALYTICS & LEADERBOARDS */}
+        {activeTab === "analytics" && (
+          <div className="space-y-8">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-[#00ff87]/10 rounded-lg border border-[#00ff87]/20">
+                <BarChart3 className="w-6 h-6 text-[#00ff87]" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Tournament Analytics & Leaderboards</h2>
+                <p className="text-xs text-white/40">Aggregated player statistics, top performers, and team power indexes calculated directly from current profiles.</p>
+              </div>
+            </div>
+
+            {/* Top 3 grids for Golden Boot, Playmaker, and Top Rated */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Golden Boot (Top Scorers) */}
+              <div className="glass-panel p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                    🏆 Golden Boot (Top Scorers)
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {[...players]
+                    .sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))
+                    .slice(0, 5)
+                    .map((p, idx) => (
+                      <div key={p.id} className="flex items-center justify-between p-2.5 bg-[#07090e]/40 border border-white/5 hover:border-purple-500/20 rounded-xl transition-all">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-xs font-bold text-[#00ff87] font-mono">#{idx + 1}</span>
+                          {renderFlag(getTeamFlag(p.team), "w-5 h-5", "text-sm")}
+                          <div className="truncate">
+                            <div className="font-bold text-xs text-white truncate">{p.name}</div>
+                            <div className="text-[9px] text-white/40 font-semibold uppercase">{p.team}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-black text-white font-mono bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded">{p.stats?.goals || 0} Goals</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Playmaker (Top Assists) */}
+              <div className="glass-panel p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                    🎯 Playmaker (Top Assists)
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {[...players]
+                    .sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0))
+                    .slice(0, 5)
+                    .map((p, idx) => (
+                      <div key={p.id} className="flex items-center justify-between p-2.5 bg-[#07090e]/40 border border-white/5 hover:border-purple-500/20 rounded-xl transition-all">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-xs font-bold text-[#00ff87] font-mono">#{idx + 1}</span>
+                          {renderFlag(getTeamFlag(p.team), "w-5 h-5", "text-sm")}
+                          <div className="truncate">
+                            <div className="font-bold text-xs text-white truncate">{p.name}</div>
+                            <div className="text-[9px] text-white/40 font-semibold uppercase">{p.team}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-black text-white font-mono bg-[#00f0ff]/10 border border-[#00f0ff]/20 px-2 py-0.5 rounded">{p.stats?.assists || 0} Asts</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Top Rated Players */}
+              <div className="glass-panel p-5 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <h3 className="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                    ⭐ Top Rated Players
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {[...players]
+                    .sort((a, b) => getPlayerRating(b) - getPlayerRating(a))
+                    .slice(0, 5)
+                    .map((p, idx) => (
+                      <div key={p.id} className="flex items-center justify-between p-2.5 bg-[#07090e]/40 border border-white/5 hover:border-purple-500/20 rounded-xl transition-all">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-xs font-bold text-[#00ff87] font-mono">#{idx + 1}</span>
+                          {renderFlag(getTeamFlag(p.team), "w-5 h-5", "text-sm")}
+                          <div className="truncate">
+                            <div className="font-bold text-xs text-white truncate">{p.name}</div>
+                            <div className="text-[9px] text-white/40 font-semibold uppercase">{p.team}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-black text-[#00ff87] font-mono bg-[#00ff87]/10 border border-[#00ff87]/20 px-2 py-0.5 rounded">{getPlayerRating(p)} Rating</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Team Power Ratings BarChart */}
+            <div className="glass-panel p-6 space-y-6">
+              <h3 className="font-bold text-white text-sm uppercase tracking-wider border-b border-white/5 pb-3 flex items-center gap-2">
+                📊 Team Power Ratings (Top 10 Squads Index)
+              </h3>
+              
+              <div className="h-80 w-full bg-[#07090e]/40 rounded-xl p-4 border border-white/5 flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={getTeamPowerRatings()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis dataKey="name" stroke="rgba(255,255,255,0.4)" fontSize={10} tickLine={false} />
+                    <YAxis domain={[60, 95]} stroke="rgba(255,255,255,0.4)" fontSize={10} tickLine={false} />
+                    <Tooltip 
+                      contentStyle={{ background: "#0d0f14", borderColor: "rgba(255,255,255,0.1)", borderRadius: "8px" }}
+                      itemStyle={{ color: "#00ff87" }}
+                      labelStyle={{ color: "white", fontWeight: "bold" }}
+                    />
+                    <Bar dataKey="rating" fill="url(#teamPowerGrad)" radius={[4, 4, 0, 0]}>
+                      {getTeamPowerRatings().map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={index === 0 ? "#00ff87" : (index === 1 ? "#00f0ff" : "#ec4899")} />
+                      ))}
+                    </Bar>
+                    <defs>
+                      <linearGradient id="teamPowerGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#00ff87" stopOpacity={0.8} />
+                        <stop offset="100%" stopColor="#00f0ff" stopOpacity={0.2} />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
         )}
 
